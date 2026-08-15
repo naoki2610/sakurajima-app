@@ -74,7 +74,7 @@ export default function App() {
       
       const timestamp = new Date().getTime();
       try {
-        const response = await fetch(`/data/dashboard_data.json?t=${timestamp}`);
+        const response = await fetch(`./data/dashboard_data.json?t=${timestamp}`);
         const data = await response.json();
         setDashboardData(data); 
 
