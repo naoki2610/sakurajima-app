@@ -1,0 +1,58 @@
+{
+  "volcano": {
+    "hasAshfallWarning": false,
+    "ashfallGeoJson": {
+      "type": "FeatureCollection",
+      "features": []
+    },
+    "recentEruptions": []
+  },
+  "weather": {
+    "current": {
+      "temp": 29.7,
+      "humidity": 65,
+      "info": {
+        "icon": "⛅",
+        "text": "晴れ/曇り"
+      }
+    },
+    "daily": [
+      {
+        "date": "8/15 (土)",
+        "info": {
+          "icon": "⛅",
+          "text": "晴れ/曇り"
+        },
+        "maxTemp": 29.9,
+        "minTemp": 25.8
+      },
+      {
+        "date": "8/16 (日)",
+        "info": {
+          "icon": "☔",
+          "text": "雨"
+        },
+        "maxTemp": 27.6,
+        "minTemp": 26.3
+      },
+      {
+        "date": "8/17 (月)",
+        "info": {
+          "icon": "☔",
+          "text": "雨"
+        },
+        "maxTemp": 29.9,
+        "minTemp": 26.3
+      },
+      {
+        "date": "8/18 (火)",
+        "info": {
+          "icon": "⚡",
+          "text": "雷雨"
+        },
+        "maxTemp": 31.4,
+        "minTemp": 24.9
+      }
+    ]
+  }
+}
