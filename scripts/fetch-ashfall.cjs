@@ -46,7 +46,8 @@ async function run() {
     weather: {
       current: null,
       daily: []
-    }
+    },
+    hourlyForecast: [] // ★新機能：時間ごとの推移データを入れる箱
   };
 
   const parser = new xml2js.Parser({ explicitArray: false });
@@ -71,12 +72,9 @@ async function run() {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
     for (const entry of entryArray) {
-      // (A) 降灰予報のURLを探す（最新の1件のみ）
       if (!ashfallUrl && entry.title.includes('降灰予報') && entry.content._.includes('桜島')) {
         ashfallUrl = entry.link.$.href;
       }
-
-      // (B) 過去1時間以内の「噴火に関する火山観測報」を探す
       if (entry.title.includes('噴火に関する火山観測報') && entry.content._.includes('桜島')) {
         const entryDate = new Date(entry.updated);
         if (entryDate >= oneHourAgo) {
@@ -88,7 +86,6 @@ async function run() {
       }
     }
 
-    // 降灰予報のポリゴン化処理
     if (ashfallUrl) {
       console.log(`取得中: 桜島 降灰予報詳細 (${ashfallUrl})...`);
       const xmlRes = await fetch(ashfallUrl);
@@ -119,11 +116,12 @@ async function run() {
     }
 
     // ==========================================
-    // 2. Open-Meteo API（天気・気温）の取得
+    // 2. Open-Meteo API（天気・気温・風・気圧）の取得
     // ==========================================
     console.log('取得中: 鹿児島市の気象データ (Open-Meteo)...');
-    // 鹿児島市の緯度経度(31.5969, 130.5571)で、現在天気と1週間の予報を取得
-    const weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=31.5969&longitude=130.5571&current=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo';
+    // ★APIのURLを大幅に拡張し、1時間ごとのデータ（hourly）と上空80mの風データを追加要求します
+    const weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=31.5969&longitude=130.5571&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,surface_pressure,wind_speed_80m,wind_direction_80m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&past_days=1';
+    
     const weatherRes = await fetch(weatherUrl);
     if (!weatherRes.ok) throw new Error(`Weather API Error: ${weatherRes.status}`);
     const weatherJson = await weatherRes.json();
@@ -131,7 +129,7 @@ async function run() {
     // 現在の天気を整形
     const currWeatherCode = weatherJson.current.weather_code;
     dashboardData.weather.current = {
-      temp: weatherJson.current.temperature_2m,
+      temp: Math.round(weatherJson.current.temperature_2m * 10) / 10,
       humidity: weatherJson.current.relative_humidity_2m,
       info: getWeatherInfo(currWeatherCode)
     };
@@ -146,9 +144,43 @@ async function run() {
       dashboardData.weather.daily.push({
         date: formattedDate,
         info: getWeatherInfo(weatherJson.daily.weather_code[i]),
-        maxTemp: weatherJson.daily.temperature_2m_max[i],
-        minTemp: weatherJson.daily.temperature_2m_min[i]
+        maxTemp: Math.round(weatherJson.daily.temperature_2m_max[i]),
+        minTemp: Math.round(weatherJson.daily.temperature_2m_min[i])
       });
+    }
+
+    // ★新機能：時間ごとの推移データ（前後3時間）を抽出
+    const now = new Date();
+    // 現在時刻（毎時00分）の文字列を作る（例: "2026-08-16T12:00"）
+    const currentHourStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:00`;
+    
+    // APIが返してきた数百時間分のリストの中から、現在時刻が何番目にあるかを探す
+    const currentIndex = weatherJson.hourly.time.findIndex(time => time === currentHourStr);
+
+    if (currentIndex !== -1) {
+      // 過去3時間（-3）から未来3時間（+3）までループ処理
+      for (let offset = -3; offset <= 3; offset++) {
+        const targetIndex = currentIndex + offset;
+        
+        // もしデータが存在する時間帯なら、抽出して整形する
+        if (targetIndex >= 0 && targetIndex < weatherJson.hourly.time.length) {
+          const timeStr = weatherJson.hourly.time[targetIndex];
+          const timeObj = new Date(timeStr);
+          const displayTime = `${String(timeObj.getHours()).padStart(2, '0')}:00`;
+
+          dashboardData.hourlyForecast.push({
+            time: displayTime,
+            offset: offset,
+            temp: Math.round(weatherJson.hourly.temperature_2m[targetIndex] * 10) / 10,
+            windSpeed: Math.round(weatherJson.hourly.wind_speed_80m[targetIndex] * 10) / 10,
+            windDir: weatherJson.hourly.wind_direction_80m[targetIndex],
+            pressure: Math.round(weatherJson.hourly.surface_pressure[targetIndex] * 10) / 10,
+            info: getWeatherInfo(weatherJson.hourly.weather_code[targetIndex])
+          });
+        }
+      }
+    } else {
+      console.warn("⚠️ APIデータの中から現在時刻が見つかりませんでした。");
     }
 
     // ==========================================
