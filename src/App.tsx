@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// データの形を厳密に定義（警告を完全に消すためのプロ仕様の設定です）
 type DashboardData = {
   volcano: {
     hasAshfallWarning: boolean;
@@ -16,7 +15,6 @@ type DashboardData = {
     };
     recentEruptions: { time: string; title: string }[];
   };
-
   weather: {
     current: {
       temp: number;
@@ -30,15 +28,26 @@ type DashboardData = {
       minTemp: number;
     }[];
   };
+  hourlyForecast?: {
+    time: string;
+    offset: number;
+    temp: number;
+    windSpeed: number;
+    windDir: number;
+    windSpeed1000m: number;
+    windDir1000m: number;
+    pressure: number;
+    info: { icon: string; text: string };
+  }[];
 };
 
 export default function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
-  const [activeTab, setActiveTab] = useState('menu1');
   
-  // 先ほど定義した DashboardData の型を適用（10行目の波線が消えます）
+  const [activeTab, setActiveTab] = useState('menu1');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [timeIndex, setTimeIndex] = useState<number>(3);
 
   useEffect(() => {
     if (!mapContainer.current) return;
@@ -63,7 +72,6 @@ export default function App() {
     });
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
-
     map.current.addControl(new maplibregl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true },
       trackUserLocation: true
@@ -130,6 +138,20 @@ export default function App() {
     return { text: 'ほぼ安全', color: '#0f766e', bg: '#f0fdf4' };
   };
 
+  // 万が一データが無い場合のダミー
+  const fallbackHourly = Array.from({ length: 7 }).map((_, i) => ({
+    time: `12:00`, offset: i - 3, temp: 25, windSpeed: 3.5, windDir: 180 + i * 30, windSpeed1000m: 5.0, windDir1000m: 190 + i * 30, pressure: 1010, info: { icon: '🌤️', text: '晴れ' }
+  }));
+
+  const hourlyData = dashboardData?.hourlyForecast || fallbackHourly;
+  const currentSlideData = hourlyData[timeIndex];
+  
+  const prevPressure = timeIndex > 0 ? hourlyData[timeIndex - 1].pressure : currentSlideData.pressure;
+  const pressureDiff = currentSlideData.pressure - prevPressure;
+  let trendMsg = { text: "気圧安定", color: '#10b981' };
+  if (pressureDiff <= -1.0) trendMsg = { text: "気圧低下中（天候悪化・突風注意）", color: '#ef4444' };
+  if (pressureDiff >= 1.0) trendMsg = { text: "気圧上昇中（天候回復傾向）", color: '#3b82f6' };
+
   return (
     <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, position: 'absolute', top: 0, left: 0 }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 0 }} />
@@ -139,16 +161,23 @@ export default function App() {
         backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '15px 20px',
         borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
         fontFamily: '"Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif',
-        width: '320px'
+        width: '330px'
       }}>
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
           🌋 桜島 生活・防災モニター
         </h1>
 
-        <div style={{ display: 'flex', gap: '5px', marginBottom: '15px' }}>
-          <button onClick={() => setActiveTab('menu1')} style={{ flex: 1, padding: '8px 4px', fontSize: '12px', cursor: 'pointer', borderRadius: '6px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === 'menu1' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'menu1' ? '#fff' : '#475569' }}>①降灰・生活</button>
-          <button onClick={() => setActiveTab('menu2')} style={{ flex: 1, padding: '8px 4px', fontSize: '12px', cursor: 'pointer', borderRadius: '6px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === 'menu2' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'menu2' ? '#fff' : '#475569' }}>②現在天気</button>
-          <button onClick={() => setActiveTab('menu3')} style={{ flex: 1, padding: '8px 4px', fontSize: '12px', cursor: 'pointer', borderRadius: '6px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === 'menu3' ? '#3b82f6' : '#f1f5f9', color: activeTab === 'menu3' ? '#fff' : '#475569' }}>③週間予報</button>
+        <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
+          {['menu1', 'menu2', 'menu3', 'menu4'].map((menu, idx) => {
+            const labels = ['①降灰', '②現在', '③週間', '④風推移'];
+            return (
+              <button key={menu} onClick={() => setActiveTab(menu)} 
+                style={{ flex: 1, padding: '8px 2px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', border: 'none', fontWeight: 'bold', 
+                backgroundColor: activeTab === menu ? '#3b82f6' : '#f1f5f9', color: activeTab === menu ? '#fff' : '#475569' }}>
+                {labels[idx]}
+              </button>
+            );
+          })}
         </div>
 
         {!dashboardData ? (
@@ -156,7 +185,7 @@ export default function App() {
             最新データを取得中...
           </div>
         ) : (
-          <div style={{ minHeight: '180px' }}>
+          <div style={{ minHeight: '200px' }}>
             
             {activeTab === 'menu1' && (
               <div>
@@ -164,7 +193,6 @@ export default function App() {
                   <div style={{ fontSize: '14px', marginBottom: '6px', color: '#334155' }}>👕 <b>洗濯予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().laundry}</span></div>
                   <div style={{ fontSize: '14px', color: '#334155' }}>🚗 <b>洗車予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().car}</span></div>
                 </div>
-
                 <div style={{ marginBottom: '12px', backgroundColor: '#fff7ed', padding: '10px', borderRadius: '8px', border: '1px solid #ffedd5' }}>
                   <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 直近の噴火活動 (過去1時間)</p>
                   <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#431407', lineHeight: '1.5' }}>
@@ -177,7 +205,6 @@ export default function App() {
                     )}
                   </ul>
                 </div>
-
                 <div style={{ fontSize: '14px', color: '#334155' }}>
                   <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 現在の降灰エリア</p>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -222,6 +249,70 @@ export default function App() {
                       <span style={{ color: '#3b82f6', width: '35px', textAlign: 'right' }}>{Math.round(day.minTemp)}℃</span>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'menu4' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155' }}>
+                    {currentSlideData.offset === 0 ? '🕒 現在' : currentSlideData.offset < 0 ? `🕒 ${Math.abs(currentSlideData.offset)}時間前` : `🕒 ${currentSlideData.offset}時間後`} 
+                    <span style={{fontSize: '12px', fontWeight: 'normal', color: '#64748b', marginLeft: '5px'}}>({currentSlideData.time})</span>
+                  </span>
+                  <span style={{ fontSize: '12px', color: trendMsg.color, fontWeight: 'bold' }}>{trendMsg.text}</span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', padding: '15px 5px', borderRadius: '8px' }}>
+                  
+                  {/* 天気・気温 */}
+                  <div style={{ textAlign: 'center', width: '28%' }}>
+                    <div style={{ fontSize: '28px' }}>{currentSlideData.info.icon}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.temp}℃</div>
+                  </div>
+                  
+                  {/* 上空80m（ドローン高度） */}
+                  <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
+                    <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>ドローン(80m)</div>
+                    <div style={{ 
+                      fontSize: '22px', color: '#0f172a', 
+                      transform: `rotate(${currentSlideData.windDir + 180}deg)`,
+                      transition: 'transform 0.3s ease',
+                      display: 'inline-block'
+                    }}>
+                      ⬆
+                    </div>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed} <span style={{fontSize: '9px'}}>m/s</span></div>
+                  </div>
+
+                  {/* 上空1000m（火口付近） */}
+                  <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
+                    <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>桜島火口(1000m)</div>
+                    <div style={{ 
+                      fontSize: '22px', color: '#e11d48', // 直感的に降灰リスクと結びつく赤色に変更
+                      transform: `rotate(${currentSlideData.windDir1000m + 180}deg)`,
+                      transition: 'transform 0.3s ease',
+                      display: 'inline-block'
+                    }}>
+                      ⬆
+                    </div>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed1000m} <span style={{fontSize: '9px'}}>m/s</span></div>
+                  </div>
+                  
+                </div>
+
+                <div style={{ marginTop: '10px', padding: '0 5px' }}>
+                  <input 
+                    type="range" min="0" max="6" step="1" 
+                    value={timeIndex} 
+                    onChange={(e) => setTimeIndex(Number(e.target.value))} 
+                    style={{ width: '100%', cursor: 'pointer' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', marginTop: '5px' }}>
+                    <span>-3h</span>
+                    <span style={{ fontWeight: timeIndex === 3 ? 'bold' : 'normal', color: timeIndex === 3 ? '#0f172a' : '#64748b' }}>現在</span>
+                    <span>+3h</span>
+                  </div>
                 </div>
               </div>
             )}

@@ -22,7 +22,6 @@ function parseJmaCoordinates(coordStr) {
   return coords;
 }
 
-// Open-Meteoの天気コードをアイコンと文字に変換する簡易関数
 function getWeatherInfo(code) {
   if (code === 0) return { icon: '☀️', text: '快晴' };
   if (code === 1 || code === 2 || code === 3) return { icon: '⛅', text: '晴れ/曇り' };
@@ -36,26 +35,22 @@ function getWeatherInfo(code) {
 async function run() {
   console.log('🌐 総合防災データの収集を開始します...');
   
-  // 最終的にフロントエンド（React）に渡すための大きなデータ箱
   const dashboardData = {
     volcano: {
       hasAshfallWarning: false,
       ashfallGeoJson: { type: "FeatureCollection", features: [] },
-      recentEruptions: [] // 過去1時間の噴火履歴を入れる箱
+      recentEruptions: [] 
     },
     weather: {
       current: null,
       daily: []
     },
-    hourlyForecast: [] // ★新機能：時間ごとの推移データを入れる箱
+    hourlyForecast: []
   };
 
   const parser = new xml2js.Parser({ explicitArray: false });
 
   try {
-    // ==========================================
-    // 1. 気象庁データ（降灰予報 ＆ 噴火履歴）の取得
-    // ==========================================
     console.log('取得中: 気象庁 高頻度フィード (eqvol.xml)...');
     const feedUrl = 'https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml';
     const feedRes = await fetch(feedUrl);
@@ -67,8 +62,6 @@ async function run() {
     const entryArray = Array.isArray(entries) ? entries : [entries];
     
     let ashfallUrl = null;
-    
-    // 現在時刻から1時間前（60分）の時刻を計算
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
     for (const entry of entryArray) {
@@ -115,18 +108,14 @@ async function run() {
       console.log('ℹ️ 現在、桜島の降灰予報（ポリゴン）は発表されていません。');
     }
 
-    // ==========================================
-    // 2. Open-Meteo API（天気・気温・風・気圧）の取得
-    // ==========================================
     console.log('取得中: 鹿児島市の気象データ (Open-Meteo)...');
-    // ★APIのURLを大幅に拡張し、1時間ごとのデータ（hourly）と上空80mの風データを追加要求します
-    const weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=31.5969&longitude=130.5571&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,surface_pressure,wind_speed_80m,wind_direction_80m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&past_days=1';
+    // ★API要求に 900hPa(約1000m) の風向・風速を追加しました
+    const weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=31.5969&longitude=130.5571&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,surface_pressure,wind_speed_80m,wind_direction_80m,wind_speed_900hPa,wind_direction_900hPa&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&past_days=1';
     
     const weatherRes = await fetch(weatherUrl);
     if (!weatherRes.ok) throw new Error(`Weather API Error: ${weatherRes.status}`);
     const weatherJson = await weatherRes.json();
 
-    // 現在の天気を整形
     const currWeatherCode = weatherJson.current.weather_code;
     dashboardData.weather.current = {
       temp: Math.round(weatherJson.current.temperature_2m * 10) / 10,
@@ -134,7 +123,6 @@ async function run() {
       info: getWeatherInfo(currWeatherCode)
     };
 
-    // 週間天気を整形（直近4日分）
     for (let i = 0; i < 4; i++) {
       const dateStr = weatherJson.daily.time[i];
       const dateObj = new Date(dateStr);
@@ -149,20 +137,14 @@ async function run() {
       });
     }
 
-    // ★新機能：時間ごとの推移データ（前後3時間）を抽出
     const now = new Date();
-    // 現在時刻（毎時00分）の文字列を作る（例: "2026-08-16T12:00"）
     const currentHourStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:00`;
-    
-    // APIが返してきた数百時間分のリストの中から、現在時刻が何番目にあるかを探す
     const currentIndex = weatherJson.hourly.time.findIndex(time => time === currentHourStr);
 
     if (currentIndex !== -1) {
-      // 過去3時間（-3）から未来3時間（+3）までループ処理
       for (let offset = -3; offset <= 3; offset++) {
         const targetIndex = currentIndex + offset;
         
-        // もしデータが存在する時間帯なら、抽出して整形する
         if (targetIndex >= 0 && targetIndex < weatherJson.hourly.time.length) {
           const timeStr = weatherJson.hourly.time[targetIndex];
           const timeObj = new Date(timeStr);
@@ -174,6 +156,9 @@ async function run() {
             temp: Math.round(weatherJson.hourly.temperature_2m[targetIndex] * 10) / 10,
             windSpeed: Math.round(weatherJson.hourly.wind_speed_80m[targetIndex] * 10) / 10,
             windDir: weatherJson.hourly.wind_direction_80m[targetIndex],
+            // ★1000mのデータを抽出して保存
+            windSpeed1000m: Math.round(weatherJson.hourly.wind_speed_900hPa[targetIndex] * 10) / 10,
+            windDir1000m: weatherJson.hourly.wind_direction_900hPa[targetIndex],
             pressure: Math.round(weatherJson.hourly.surface_pressure[targetIndex] * 10) / 10,
             info: getWeatherInfo(weatherJson.hourly.weather_code[targetIndex])
           });
@@ -183,9 +168,6 @@ async function run() {
       console.warn("⚠️ APIデータの中から現在時刻が見つかりませんでした。");
     }
 
-    // ==========================================
-    // 3. 全データを1つのJSONファイルに保存
-    // ==========================================
     const outputPath = path.join(DATA_DIR, 'dashboard_data.json');
     fs.writeFileSync(outputPath, JSON.stringify(dashboardData, null, 2));
     console.log(`✅ 完了: 総合データを保存しました -> ${outputPath}`);
