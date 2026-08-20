@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// 追加：天気コードをアイコンと文字に変換する関数（フロントエンド用）
+// 天気コードをアイコンと文字に変換する関数
 function getWeatherInfo(code: number) {
   if (code === 0) return { icon: '☀️', text: '快晴' };
   if (code === 1 || code === 2 || code === 3) return { icon: '⛅', text: '晴れ/曇り' };
@@ -93,18 +93,37 @@ export default function App() {
       
       const timestamp = new Date().getTime();
       try {
+        // 1. ベースとなるデータ（桜島情報や風の推移など）を取得
         const response = await fetch(`./data/dashboard_data.json?t=${timestamp}`);
         const data = await response.json();
         setDashboardData(data); 
 
-        // 追加：現在地の天気をリアルタイム取得して上書きする処理
+        // 2. 現在地の天気・週間予報をリアルタイム取得して上書きする処理
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(async (position) => {
             const { latitude, longitude } = position.coords;
             try {
-              const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code&timezone=Asia%2FTokyo`);
+              // APIの要求に「daily（週間予報）」のパラメータを追加
+              const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
               const weatherData = await weatherRes.json();
               
+              // 取得したデータから4日分の週間予報リストを作成
+              const dailyForecasts = [];
+              for (let i = 0; i < 4; i++) {
+                const dateStr = weatherData.daily.time[i];
+                const dateObj = new Date(dateStr);
+                const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+                const formattedDate = `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`;
+                
+                dailyForecasts.push({
+                  date: formattedDate,
+                  info: getWeatherInfo(weatherData.daily.weather_code[i]),
+                  maxTemp: Math.round(weatherData.daily.temperature_2m_max[i]),
+                  minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
+                });
+              }
+
+              // 現在の天気と週間予報の両方を、現在地のデータで上書き
               setDashboardData(prev => prev ? {
                 ...prev,
                 weather: {
@@ -113,7 +132,8 @@ export default function App() {
                     temp: Math.round(weatherData.current.temperature_2m * 10) / 10,
                     humidity: weatherData.current.relative_humidity_2m,
                     info: getWeatherInfo(weatherData.current.weather_code)
-                  }
+                  },
+                  daily: dailyForecasts
                 }
               } : null);
             } catch (e) {
@@ -276,7 +296,7 @@ export default function App() {
 
             {activeTab === 'menu3' && (
               <div>
-                <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155', marginBottom: '10px' }}>📅 鹿児島市の週間予報</div>
+                <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155', marginBottom: '10px' }}>📅 現在地の週間予報</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {dashboardData.weather.daily.map((day, idx) => (
                     <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: idx !== 3 ? '1px solid #f1f5f9' : 'none', paddingBottom: '4px' }}>
