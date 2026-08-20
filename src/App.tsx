@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// 天気コードをアイコンと文字に変換する関数
 function getWeatherInfo(code: number) {
   if (code === 0) return { icon: '☀️', text: '快晴' };
   if (code === 1 || code === 2 || code === 3) return { icon: '⛅', text: '晴れ/曇り' };
@@ -93,22 +92,20 @@ export default function App() {
       
       const timestamp = new Date().getTime();
       try {
-        // 1. ベースとなるデータ（桜島情報や風の推移など）を取得
         const response = await fetch(`./data/dashboard_data.json?t=${timestamp}`);
         const data = await response.json();
         setDashboardData(data); 
 
-        // 2. 現在地の天気・週間予報をリアルタイム取得して上書きする処理
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(async (position) => {
             const { latitude, longitude } = position.coords;
             try {
-              // APIの要求に「daily（週間予報）」のパラメータを追加
               const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
               const weatherData = await weatherRes.json();
               
-              // 取得したデータから4日分の週間予報リストを作成
-              const dailyForecasts = [];
+              // 【修正箇所】箱（配列）に厳格な型（ルール）を明記しました
+              const dailyForecasts: { date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number }[] = [];
+              
               for (let i = 0; i < 4; i++) {
                 const dateStr = weatherData.daily.time[i];
                 const dateObj = new Date(dateStr);
@@ -123,7 +120,6 @@ export default function App() {
                 });
               }
 
-              // 現在の天気と週間予報の両方を、現在地のデータで上書き
               setDashboardData(prev => prev ? {
                 ...prev,
                 weather: {
