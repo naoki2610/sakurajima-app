@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
+function getWeatherInfo(code: number) {
+  if (code === 0) return { icon: '☀️', text: '快晴' };
+  if (code === 1 || code === 2 || code === 3) return { icon: '⛅', text: '晴れ/曇り' };
+  if (code >= 45 && code <= 48) return { icon: '🌫️', text: '霧' };
+  if (code >= 51 && code <= 67) return { icon: '☔', text: '雨' };
+  if (code >= 71 && code <= 82) return { icon: '⛄', text: '雪' };
+  if (code >= 95) return { icon: '⚡', text: '雷雨' };
+  return { icon: '☁️', text: '不明' };
+}
+
 type DashboardData = {
   volcano: {
     hasAshfallWarning: boolean;
@@ -47,7 +57,7 @@ export default function App() {
   
   const [activeTab, setActiveTab] = useState('menu1');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
-  const [timeIndex, setTimeIndex] = useState<number>(3);
+  const [timeIndex, setTimeIndex] = useState<number>(3); // デフォルトは「現在 (インデックス3)」
 
   useEffect(() => {
     if (!mapContainer.current) return;
@@ -67,7 +77,7 @@ export default function App() {
         },
         layers: [{ id: 'osm-layer', type: 'raster', source: 'osm', minzoom: 0, maxzoom: 19 }],
       },
-      center: [130.657, 31.580],
+      center: [130.657, 31.580], // 桜島周辺を中心に設定
       zoom: 10,
     });
 
@@ -82,31 +92,79 @@ export default function App() {
       
       const timestamp = new Date().getTime();
       try {
+        // Step 1 & 2 で作成された統合データを読み込み
         const response = await fetch(`./data/dashboard_data.json?t=${timestamp}`);
         const data = await response.json();
         setDashboardData(data); 
 
-        map.current.addSource('ashfall-data', {
-          type: 'geojson',
-          data: data.volcano.ashfallGeoJson,
-        });
+        // 現在地（GPS）に基づくピンポイント気象データの取得
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(async (position) => {
+            const { latitude, longitude } = position.coords;
+            try {
+              const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
+              const weatherData = await weatherRes.json();
+              
+              const dailyForecasts: { date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number }[] = [];
+              
+              for (let i = 0; i < 4; i++) {
+                const dateStr = weatherData.daily.time[i];
+                const dateObj = new Date(dateStr);
+                const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+                const formattedDate = `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`;
+                
+                dailyForecasts.push({
+                  date: formattedDate,
+                  info: getWeatherInfo(weatherData.daily.weather_code[i]),
+                  maxTemp: Math.round(weatherData.daily.temperature_2m_max[i]),
+                  minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
+                });
+              }
 
-        map.current.addLayer({
-          id: 'ashfall-fill',
-          type: 'fill',
-          source: 'ashfall-data',
-          paint: {
-            'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'],
-            'fill-opacity': 0.55,
-          },
-        });
+              setDashboardData(prev => prev ? {
+                ...prev,
+                weather: {
+                  ...prev.weather,
+                  current: {
+                    temp: Math.round(weatherData.current.temperature_2m * 10) / 10,
+                    humidity: weatherData.current.relative_humidity_2m,
+                    info: getWeatherInfo(weatherData.current.weather_code)
+                  },
+                  daily: dailyForecasts
+                }
+              } : null);
+            } catch (e) {
+              console.warn("現在地の天気取得に失敗しました。");
+            }
+          }, () => {
+             console.warn("位置情報の取得が拒否されたか失敗しました。");
+          });
+        }
 
-        map.current.addLayer({
-          id: 'ashfall-line',
-          type: 'line',
-          source: 'ashfall-data',
-          paint: { 'line-color': '#475569', 'line-width': 2 },
-        });
+        // 地図上に降灰予報（GeoJSON）をレイヤーとして追加
+        if (data.volcano && data.volcano.ashfallGeoJson) {
+            map.current.addSource('ashfall-data', {
+              type: 'geojson',
+              data: data.volcano.ashfallGeoJson,
+            });
+
+            map.current.addLayer({
+              id: 'ashfall-fill',
+              type: 'fill',
+              source: 'ashfall-data',
+              paint: {
+                'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'],
+                'fill-opacity': 0.55,
+              },
+            });
+
+            map.current.addLayer({
+              id: 'ashfall-line',
+              type: 'line',
+              source: 'ashfall-data',
+              paint: { 'line-color': '#475569', 'line-width': 2 },
+            });
+        }
       } catch (err) {
         console.error("データの読み込みに失敗しました:", err);
       }
@@ -125,7 +183,7 @@ export default function App() {
     const { hasAshfallWarning } = dashboardData.volcano;
     const isRaining = dashboardData.weather.current.info.text.includes('雨');
     
-    if (hasAshfallWarning) return { laundry: '部屋干し推奨（降灰あり）', car: '控えるべき（降灰あり）', color: '#e11d48' };
+    if (hasAshfallWarning) return { laundry: '部屋干し推奨（降灰警戒）', car: '控えるべき（降灰警戒）', color: '#e11d48' };
     if (isRaining) return { laundry: '部屋干し推奨（雨）', car: '控えるべき（雨）', color: '#3b82f6' };
     return { laundry: '外干しOK', car: '洗車日和', color: '#16a34a' };
   };
@@ -138,7 +196,6 @@ export default function App() {
     return { text: 'ほぼ安全', color: '#0f766e', bg: '#f0fdf4' };
   };
 
-  // 万が一データが無い場合のダミー
   const fallbackHourly = Array.from({ length: 7 }).map((_, i) => ({
     time: `12:00`, offset: i - 3, temp: 25, windSpeed: 3.5, windDir: 180 + i * 30, windSpeed1000m: 5.0, windDir1000m: 190 + i * 30, pressure: 1010, info: { icon: '🌤️', text: '晴れ' }
   }));
@@ -193,20 +250,25 @@ export default function App() {
                   <div style={{ fontSize: '14px', marginBottom: '6px', color: '#334155' }}>👕 <b>洗濯予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().laundry}</span></div>
                   <div style={{ fontSize: '14px', color: '#334155' }}>🚗 <b>洗車予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().car}</span></div>
                 </div>
+                
+                {/* 過去3時間の履歴をスクロール表示できるように改修 */}
                 <div style={{ marginBottom: '12px', backgroundColor: '#fff7ed', padding: '10px', borderRadius: '8px', border: '1px solid #ffedd5' }}>
-                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 直近の噴火活動 (過去1時間)</p>
-                  <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#431407', lineHeight: '1.5' }}>
+                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 過去3時間の噴火履歴</p>
+                  <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#431407', lineHeight: '1.5', maxHeight: '75px', overflowY: 'auto' }}>
                     {dashboardData.volcano.recentEruptions.length === 0 ? (
-                      <li>噴火は観測されていません</li>
+                      <li>過去3時間の噴火は観測されていません</li>
                     ) : (
                       dashboardData.volcano.recentEruptions.map((eruption, idx) => (
-                        <li key={idx}>{eruption.time} {eruption.title}</li>
+                        <li key={idx} style={{ marginBottom: '4px' }}>
+                          <span style={{ fontWeight: 'bold', color: '#9a3412' }}>{eruption.time.substring(11, 16)}</span> - {eruption.title}
+                        </li>
                       ))
                     )}
                   </ul>
                 </div>
+                
                 <div style={{ fontSize: '14px', color: '#334155' }}>
-                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 現在の降灰エリア</p>
+                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 現在の降灰予測エリア</p>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                     <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#e11d48', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '12px' }}>多量</span></div>
                     <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#f97316', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '12px' }}>やや多量</span></div>
@@ -239,7 +301,7 @@ export default function App() {
 
             {activeTab === 'menu3' && (
               <div>
-                <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155', marginBottom: '10px' }}>📅 鹿児島市の週間予報</div>
+                <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155', marginBottom: '10px' }}>📅 現在地の週間予報</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {dashboardData.weather.daily.map((day, idx) => (
                     <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: idx !== 3 ? '1px solid #f1f5f9' : 'none', paddingBottom: '4px' }}>
@@ -265,13 +327,11 @@ export default function App() {
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', padding: '15px 5px', borderRadius: '8px' }}>
                   
-                  {/* 天気・気温 */}
                   <div style={{ textAlign: 'center', width: '28%' }}>
                     <div style={{ fontSize: '28px' }}>{currentSlideData.info.icon}</div>
                     <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.temp}℃</div>
                   </div>
                   
-                  {/* 上空80m（ドローン高度） */}
                   <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                     <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>ドローン(80m)</div>
                     <div style={{ 
@@ -285,11 +345,10 @@ export default function App() {
                     <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed} <span style={{fontSize: '9px'}}>m/s</span></div>
                   </div>
 
-                  {/* 上空1000m（火口付近） */}
                   <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                     <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>桜島火口(1000m)</div>
                     <div style={{ 
-                      fontSize: '22px', color: '#e11d48', // 直感的に降灰リスクと結びつく赤色に変更
+                      fontSize: '22px', color: '#e11d48',
                       transform: `rotate(${currentSlideData.windDir1000m + 180}deg)`,
                       transition: 'transform 0.3s ease',
                       display: 'inline-block'
