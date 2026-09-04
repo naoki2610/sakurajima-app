@@ -17,13 +17,28 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
   throw new Error(`通信に完全に失敗しました: ${url}`);
 }
 
+// 複雑な気象庁XMLから降灰エリア（AshFallItem）を再帰的に探し出す関数
+function findAshFallItems(obj, items = []) {
+  if (!obj) return items;
+  if (typeof obj === 'object') {
+      for (let key in obj) {
+          if (key.includes('AshFallItem')) {
+              if (Array.isArray(obj[key])) items.push(...obj[key]);
+              else items.push(obj[key]);
+          } else {
+              findAshFallItems(obj[key], items);
+          }
+      }
+  }
+  return items;
+}
+
 async function main() {
   console.log('🌐 総合防災データの収集を開始します...');
 
   const outDir = path.join(process.cwd(), 'public', 'data');
   const dataFile = path.join(outDir, 'dashboard_data.json');
 
-  // 【Step 1改修】既存データを読み込み、過去の履歴を保持する
   let existingEruptions = [];
   if (fs.existsSync(dataFile)) {
       try {
@@ -43,14 +58,16 @@ async function main() {
     recentEruptions: existingEruptions
   };
 
+  const jmaHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/xml, text/xml, */*; q=0.01',
+      'Cache-Control': 'no-cache, no-store, must-revalidate'
+  };
+
+  let forecastUrl = null; // 降灰予報の詳細データURL
+
   try {
     console.log('取得中: 気象庁 高頻度フィード (eqvol.xml)...');
-    const jmaHeaders = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/xml, text/xml, */*; q=0.01',
-        'Cache-Control': 'no-cache, no-store, must-revalidate'
-    };
-
     const response = await fetchWithRetry('https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml', { headers: jmaHeaders }, 3);
     const xmlData = await response.text();
     const parser = new xml2js.Parser();
@@ -63,26 +80,27 @@ async function main() {
            const eTitle = entry.title[0];
            
            if (eTime) {
-               // 重複チェック（すでに記録済みの噴火は追加しない）
                const isDuplicate = volcanoData.recentEruptions.some(e => e.time === eTime && e.title === eTitle);
                if (!isDuplicate) {
                    volcanoData.recentEruptions.push({ time: eTime, title: eTitle });
                }
            }
+
+           // 【Step 2改修】降灰予報のURLを抽出する
+           if (eTitle.includes('降灰予報') && !forecastUrl) {
+               forecastUrl = entry.link[0].$.href;
+           }
        }
     }
     
-    // 【Step 1改修】過去3時間以内のデータのみを残すフィルター処理
+    // 過去3時間以内のデータのみを残すフィルター処理
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
     volcanoData.recentEruptions = volcanoData.recentEruptions.filter(e => {
-        if (e.time === '【システム警告】') return false; // エラーメッセージは一旦クリア
+        if (e.time === '【システム警告】') return false;
         if (e.time === '不明') return false;
-        
         const eDate = new Date(e.time);
         return eDate >= threeHoursAgo;
     });
-
-    // 降順（新しい順）に並び替え
     volcanoData.recentEruptions.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     if (volcanoData.recentEruptions.length > 0) {
@@ -90,12 +108,68 @@ async function main() {
     }
 
   } catch (error) {
-    console.error(`❌ 気象庁データの取得エラー: ${error.message}`);
+    console.error(`❌ 気象庁基本データの取得エラー: ${error.message}`);
     volcanoData.hasAshfallWarning = true;
     volcanoData.recentEruptions.unshift({
         time: "【システム警告】",
         title: "気象庁データの取得に失敗しました。過去3時間のデータが最新ではない可能性があります。"
     });
+  }
+
+  // 【Step 2改修】詳細な予測降灰エリアデータの取得とGeoJSON変換
+  if (forecastUrl) {
+      console.log(`詳細な降灰予報エリアデータを取得・解析します: ${forecastUrl}`);
+      try {
+          const detailRes = await fetchWithRetry(forecastUrl, { headers: jmaHeaders }, 3);
+          const detailXml = await detailRes.text();
+          const detailParser = new xml2js.Parser();
+          const detailParsed = await detailParser.parseStringPromise(detailXml);
+
+          const ashFallItems = findAshFallItems(detailParsed);
+          
+          ashFallItems.forEach(item => {
+              // 降灰量の判定（多量、やや多量、少量）
+              let amount = "不明";
+              const jsonStr = JSON.stringify(item);
+              if (jsonStr.includes('多量')) amount = "多量";
+              else if (jsonStr.includes('やや多量')) amount = "やや多量";
+              else if (jsonStr.includes('少量')) amount = "少量";
+
+              // 座標（Polygon）の抽出とGeoJSON化
+              // 気象庁の座標は "緯度 経度 緯度 経度..." の順（例: "31.5 130.6 31.6 130.7"）
+              const posListMatch = jsonStr.match(/"gml:posList":\["([^"]+)"\]/);
+              if (posListMatch && posListMatch[1] && amount !== "不明") {
+                  const coordsRaw = posListMatch[1].trim().split(/\s+/);
+                  let coordinates = [];
+                  for (let i = 0; i < coordsRaw.length; i += 2) {
+                      const lat = parseFloat(coordsRaw[i]);
+                      const lon = parseFloat(coordsRaw[i + 1]);
+                      if (!isNaN(lat) && !isNaN(lon)) {
+                          // GeoJSONは [経度, 緯度] の順
+                          coordinates.push([lon, lat]);
+                      }
+                  }
+                  
+                  if (coordinates.length > 2) {
+                      // GeoJSONの仕様として、始点と終点を一致させる
+                      const firstNode = coordinates[0];
+                      const lastNode = coordinates[coordinates.length - 1];
+                      if (firstNode[0] !== lastNode[0] || firstNode[1] !== lastNode[1]) {
+                          coordinates.push(firstNode);
+                      }
+
+                      volcanoData.ashfallGeoJson.features.push({
+                          type: "Feature",
+                          properties: { volcano: "桜島", amount: amount },
+                          geometry: { type: "Polygon", coordinates: [coordinates] }
+                      });
+                  }
+              }
+          });
+          console.log(`✅ 降灰エリアのポリゴン抽出に成功しました (エリア数: ${volcanoData.ashfallGeoJson.features.length})`);
+      } catch (err) {
+          console.log(`⚠️ 降灰予報エリアデータの解析に失敗しましたが、処理を継続します: ${err.message}`);
+      }
   }
 
   console.log('取得中: Open-Meteo 上空風データ (80m & 1000m)...');
