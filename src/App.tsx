@@ -2,6 +2,22 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
+// 【修正箇所】時間を日本時間（JST）の分かりやすい形式に変換する関数
+function formatJST(timeStr: string) {
+  if (timeStr === '【システム警告】' || timeStr === '不明') return timeStr;
+  try {
+    const d = new Date(timeStr);
+    if (isNaN(d.getTime())) return timeStr;
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const hours = d.getHours().toString().padStart(2, '0');
+    const minutes = d.getMinutes().toString().padStart(2, '0');
+    return `${month}/${day} ${hours}:${minutes}`;
+  } catch (e) {
+    return timeStr;
+  }
+}
+
 function getWeatherInfo(code: number) {
   if (code === 0) return { icon: '☀️', text: '快晴' };
   if (code === 1 || code === 2 || code === 3) return { icon: '⛅', text: '晴れ/曇り' };
@@ -103,7 +119,6 @@ export default function App() {
               const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
               const weatherData = await weatherRes.json();
               
-              // 【修正箇所】箱（配列）に厳格な型（ルール）を明記しました
               const dailyForecasts: { date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number }[] = [];
               
               for (let i = 0; i < 4; i++) {
@@ -140,27 +155,29 @@ export default function App() {
           });
         }
 
-        map.current.addSource('ashfall-data', {
-          type: 'geojson',
-          data: data.volcano.ashfallGeoJson,
-        });
+        if (data.volcano && data.volcano.ashfallGeoJson) {
+            map.current.addSource('ashfall-data', {
+              type: 'geojson',
+              data: data.volcano.ashfallGeoJson,
+            });
 
-        map.current.addLayer({
-          id: 'ashfall-fill',
-          type: 'fill',
-          source: 'ashfall-data',
-          paint: {
-            'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'],
-            'fill-opacity': 0.55,
-          },
-        });
+            map.current.addLayer({
+              id: 'ashfall-fill',
+              type: 'fill',
+              source: 'ashfall-data',
+              paint: {
+                'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'],
+                'fill-opacity': 0.55,
+              },
+            });
 
-        map.current.addLayer({
-          id: 'ashfall-line',
-          type: 'line',
-          source: 'ashfall-data',
-          paint: { 'line-color': '#475569', 'line-width': 2 },
-        });
+            map.current.addLayer({
+              id: 'ashfall-line',
+              type: 'line',
+              source: 'ashfall-data',
+              paint: { 'line-color': '#475569', 'line-width': 2 },
+            });
+        }
       } catch (err) {
         console.error("データの読み込みに失敗しました:", err);
       }
@@ -179,7 +196,7 @@ export default function App() {
     const { hasAshfallWarning } = dashboardData.volcano;
     const isRaining = dashboardData.weather.current.info.text.includes('雨');
     
-    if (hasAshfallWarning) return { laundry: '部屋干し推奨（降灰あり）', car: '控えるべき（降灰あり）', color: '#e11d48' };
+    if (hasAshfallWarning) return { laundry: '部屋干し推奨（降灰警戒）', car: '控えるべき（降灰警戒）', color: '#e11d48' };
     if (isRaining) return { laundry: '部屋干し推奨（雨）', car: '控えるべき（雨）', color: '#3b82f6' };
     return { laundry: '外干しOK', car: '洗車日和', color: '#16a34a' };
   };
@@ -246,20 +263,26 @@ export default function App() {
                   <div style={{ fontSize: '14px', marginBottom: '6px', color: '#334155' }}>👕 <b>洗濯予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().laundry}</span></div>
                   <div style={{ fontSize: '14px', color: '#334155' }}>🚗 <b>洗車予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().car}</span></div>
                 </div>
+                
                 <div style={{ marginBottom: '12px', backgroundColor: '#fff7ed', padding: '10px', borderRadius: '8px', border: '1px solid #ffedd5' }}>
-                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 直近の噴火活動 (過去1時間)</p>
-                  <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#431407', lineHeight: '1.5' }}>
+                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 過去3時間の噴火履歴</p>
+                  <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#431407', lineHeight: '1.5', maxHeight: '100px', overflowY: 'auto' }}>
                     {dashboardData.volcano.recentEruptions.length === 0 ? (
-                      <li>噴火は観測されていません</li>
+                      <li>過去3時間の噴火は観測されていません</li>
                     ) : (
                       dashboardData.volcano.recentEruptions.map((eruption, idx) => (
-                        <li key={idx}>{eruption.time} {eruption.title}</li>
+                        <li key={idx} style={{ marginBottom: '6px', borderBottom: '1px dashed #fed7aa', paddingBottom: '4px' }}>
+                          {/* 【修正箇所】ここで formatJST 関数を通し、完全に日本時間（例: 9/14 11:48）として表示させます */}
+                          <div style={{ fontWeight: 'bold', color: '#9a3412', fontSize: '13px' }}>{formatJST(eruption.time)}</div>
+                          <div>{eruption.title}</div>
+                        </li>
                       ))
                     )}
                   </ul>
                 </div>
+                
                 <div style={{ fontSize: '14px', color: '#334155' }}>
-                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 現在の降灰エリア</p>
+                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 現在の降灰予測エリア</p>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                     <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#e11d48', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '12px' }}>多量</span></div>
                     <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#f97316', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '12px' }}>やや多量</span></div>
@@ -269,6 +292,7 @@ export default function App() {
               </div>
             )}
 
+            {/* 以下 menu2, menu3, menu4 は変更なし */}
             {activeTab === 'menu2' && (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px', backgroundColor: '#f0f9ff', padding: '15px', borderRadius: '8px' }}>
@@ -317,12 +341,10 @@ export default function App() {
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', padding: '15px 5px', borderRadius: '8px' }}>
-                  
                   <div style={{ textAlign: 'center', width: '28%' }}>
                     <div style={{ fontSize: '28px' }}>{currentSlideData.info.icon}</div>
                     <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.temp}℃</div>
                   </div>
-                  
                   <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                     <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>ドローン(80m)</div>
                     <div style={{ 
@@ -335,7 +357,6 @@ export default function App() {
                     </div>
                     <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed} <span style={{fontSize: '9px'}}>m/s</span></div>
                   </div>
-
                   <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                     <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>桜島火口(1000m)</div>
                     <div style={{ 
@@ -348,7 +369,6 @@ export default function App() {
                     </div>
                     <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed1000m} <span style={{fontSize: '9px'}}>m/s</span></div>
                   </div>
-                  
                 </div>
 
                 <div style={{ marginTop: '10px', padding: '0 5px' }}>
