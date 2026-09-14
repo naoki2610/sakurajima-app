@@ -21,45 +21,27 @@ async function main() {
   const outDir = path.join(process.cwd(), 'public', 'data');
   const dataFile = path.join(outDir, 'dashboard_data.json');
 
-  // 【決定版・絶対死守の鉄則】
-  // まずローカル（同一ワークスペース内）に既存ファイルがあれば、それを最優先のベース（直近の状態）として読み込む
-  let previousData = {
-    hasAshfallWarning: false,
-    ashfallGeoJson: { type: "FeatureCollection", features: [] },
-    recentEruptions: [],
-    validUntil: null,
-    directionText: null
-  };
-
-  if (fs.existsSync(dataFile)) {
-      try {
-          const rawLocal = fs.readFileSync(dataFile, 'utf8');
-          previousData = JSON.parse(rawLocal);
-          console.log(`✅ ローカルファイルから既存状態を確実にロードしました（ポリゴン数: ${previousData.ashfallGeoJson?.features?.length || 0}）`);
-      } catch (e) {
-          console.log('⚠️ ローカルファイルのパースに失敗しました。');
-      }
-  }
-
-  // 次に本番環境からも最新の状態を同期試行（失敗してもローカルのpreviousDataがあるため絶対にデータが消えない）
+  let existingEruptions = [];
   try {
       const timestamp = new Date().getTime();
       const liveRes = await fetch(`https://raw.githubusercontent.com/naoki2610/sakurajima-app/gh-pages/data/dashboard_data.json?t=${timestamp}`);
       if (liveRes.ok) {
           const parsed = await liveRes.json();
-          if (parsed.volcano && parsed.volcano.ashfallGeoJson?.features?.length > 0) {
-              // 本番により新しいポリゴンがあればマージ、なければ既存を維持
-              if (previousData.ashfallGeoJson.features.length === 0) {
-                  previousData = parsed.volcano;
-                  console.log('✅ 本番環境から状態を補完しました。');
-              }
+          if (parsed.volcano && parsed.volcano.recentEruptions) {
+              existingEruptions = parsed.volcano.recentEruptions;
           }
       }
   } catch (e) {
-      console.log('⚠️ 本番環境からの同期スキップ（ローカルデータを維持します）。');
+      console.log('⚠️ 本番環境からの復元スキップ');
   }
 
-  let volcanoData = previousData; // 既存の状態を引き継ぐ
+  let volcanoData = {
+    hasAshfallWarning: false,
+    ashfallGeoJson: { type: "FeatureCollection", features: [] },
+    recentEruptions: existingEruptions,
+    validUntil: null,
+    directionText: null
+  };
 
   const jmaHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -91,7 +73,7 @@ async function main() {
                }
            }
            if (eTitle.includes('降灰予報')) {
-               forecastUrls.push(entry.link[0].$.href);
+               forecastUrls.push(entry.link[0].$.href); // 全ての降灰予報URLを保持
            }
        }
     }
@@ -108,11 +90,9 @@ async function main() {
     hasJmaError = true;
   }
 
-  let fetchedPolygons = [];
-  let fetchedValidUntil = null;
-  let fetchedDirection = null;
-
+  // 【究極の改修】XMLパーサーを捨て、Rawテキストから正規表現で強引かつ確実にデータを引っこ抜く
   if (forecastUrls.length > 0 && !hasJmaError) {
+      // 最新の速報と詳細を両方解析するため、新しい順に最大2件処理する
       const targetUrls = [...new Set(forecastUrls)].slice(0, 2);
       
       for (const url of targetUrls) {
@@ -120,21 +100,28 @@ async function main() {
               const res = await fetchWithRetry(url, { headers: jmaHeaders }, 3);
               const rawXml = await res.text();
               
-              if (!fetchedValidUntil) {
+              // 1. 有効期限 (ValidDateTime) の確実な抽出
+              if (!volcanoData.validUntil) {
                   const validMatch = rawXml.match(/<[^>]*ValidDateTime>([^<]+)<\//);
-                  if (validMatch) fetchedValidUntil = validMatch[1].trim();
+                  if (validMatch) volcanoData.validUntil = validMatch[1].trim();
               }
 
-              if (!fetchedDirection) {
+              // 2. 降灰方向テキストの確実な抽出
+              if (!volcanoData.directionText) {
+                  // 「火口から北方向（姶良市加治木方向）に火山灰が流され」等を取得
                   const textMatch = rawXml.match(/火口から([^<。]+方向[^<。]*)[にへ]火山灰が流され/);
-                  if (textMatch) fetchedDirection = textMatch[1].trim();
-                  else {
+                  if (textMatch) {
+                      volcanoData.directionText = textMatch[1].trim();
+                  } else {
+                      // フォールバック: PlumeDirection属性から取得
                       const pdMatch = rawXml.match(/<[^>]*PlumeDirection[^>]*description="([^"]+)"/);
-                      if (pdMatch && !pdMatch[1].includes('不明')) fetchedDirection = pdMatch[1].trim();
+                      if (pdMatch) volcanoData.directionText = pdMatch[1].trim();
                   }
               }
 
-              const items = rawXml.split(/<[^>]*Item>/i);
+              // 3. 降灰ポリゴン座標の確実な抽出
+              // XMLを<Item>タグごとに分割して、個別に「量」と「座標」を判定する
+              const items = rawXml.split(/<[^>]*Item>/);
               items.forEach(itemStr => {
                   let amount = "不明";
                   if (itemStr.includes('多量') && !itemStr.includes('やや多量')) amount = "多量";
@@ -142,6 +129,7 @@ async function main() {
                   else if (itemStr.includes('少量')) amount = "少量";
 
                   if (amount !== "不明") {
+                      // <gml:posList> 等の中身を全て抽出
                       const posRegex = /<[^>]*posList>([^<]+)<\//g;
                       let match;
                       while ((match = posRegex.exec(itemStr)) !== null) {
@@ -153,10 +141,11 @@ async function main() {
                               if (!isNaN(lat) && !isNaN(lon)) coords.push([lon, lat]);
                           }
                           if (coords.length > 2) {
-                              if (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1]) {
+                              // ポリゴンを閉じる
+                              if (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1]) {
                                   coords.push(coords[0]);
                               }
-                              fetchedPolygons.push({
+                              volcanoData.ashfallGeoJson.features.push({
                                   type: "Feature", properties: { volcano: "桜島", amount: amount },
                                   geometry: { type: "Polygon", coordinates: [coords] }
                               });
@@ -168,29 +157,14 @@ async function main() {
               console.log(`⚠️ 詳細XMLの解析エラー: ${err.message}`);
           }
       }
+      console.log(`✅ 抽出完了: ポリゴン数 ${volcanoData.ashfallGeoJson.features.length}, 方向: ${volcanoData.directionText}`);
   }
 
-  // 新しいデータが取得できた場合のみ更新。取得できなかった場合は既存データを保持する
-  if (fetchedPolygons.length > 0) {
-      volcanoData.ashfallGeoJson.features = fetchedPolygons;
-  }
-  if (fetchedValidUntil) volcanoData.validUntil = fetchedValidUntil;
-  if (fetchedDirection) volcanoData.directionText = fetchedDirection;
-
-  // 有効期限の厳格なチェック。期限切れのときのみクリアする
   const now = new Date();
-  if (volcanoData.validUntil && now.getTime() > new Date(volcanoData.validUntil).getTime()) {
-      console.log(`ℹ️ 有効期限(${volcanoData.validUntil})を過ぎたため、降灰エリアと警告をクリアします。`);
-      volcanoData.ashfallGeoJson.features = [];
-      volcanoData.directionText = null;
-      volcanoData.validUntil = null;
-  }
-
   let warningActive = false;
   if (volcanoData.validUntil && now <= new Date(volcanoData.validUntil)) {
       warningActive = true;
   }
-
   const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
   const hasRecentEruption = volcanoData.recentEruptions.some(e => {
       if (e.time === '【システム警告】') return false;
@@ -199,6 +173,7 @@ async function main() {
 
   volcanoData.hasAshfallWarning = hasJmaError || warningActive || hasRecentEruption || (volcanoData.directionText !== null);
 
+  // 天気情報の取得（省略せず記述）
   console.log('取得中: Open-Meteo 上空風データ (80m & 1000m)...');
   let hourlyForecast = [];
   try {
