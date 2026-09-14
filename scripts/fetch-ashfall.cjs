@@ -37,24 +37,29 @@ async function main() {
   const outDir = path.join(process.cwd(), 'public', 'data');
   const dataFile = path.join(outDir, 'dashboard_data.json');
 
+  // 【プロ仕様の抜本的改修】
+  // ローカルファイル(Git)への依存を断ち切り、本番公開されているURLから直接過去の「状態」をフェッチする
   let existingEruptions = [];
-  if (fs.existsSync(dataFile)) {
-      try {
-          const raw = fs.readFileSync(dataFile, 'utf8');
-          const parsed = JSON.parse(raw);
+  try {
+      const timestamp = new Date().getTime(); // キャッシュ避け
+      // ※URLは直樹さんの実際の公開先URLにアクセスします
+      const liveRes = await fetch(`https://naoki2610.github.io/sakurajima-app/data/dashboard_data.json?t=${timestamp}`);
+      if (liveRes.ok) {
+          const parsed = await liveRes.json();
           if (parsed.volcano && parsed.volcano.recentEruptions) {
               existingEruptions = parsed.volcano.recentEruptions;
+              console.log(`✅ 本番環境から ${existingEruptions.length} 件の履歴を復元しました。`);
           }
-      } catch (e) {
-          console.log('⚠️ 既存データの読み込みをスキップします。');
       }
+  } catch (e) {
+      console.log('⚠️ 本番環境からのデータ復元をスキップします（初回起動または通信エラー）。');
   }
 
   let volcanoData = {
     hasAshfallWarning: false,
     ashfallGeoJson: { type: "FeatureCollection", features: [] },
     recentEruptions: existingEruptions,
-    validUntil: null // 【新規】気象庁の予報有効期限を保持
+    validUntil: null
   };
 
   const jmaHeaders = {
@@ -94,7 +99,7 @@ async function main() {
        }
     }
     
-    // 【改修】早すぎる履歴リセットを撤廃し「過去12時間分」を確実に保持する
+    // 過去12時間分のデータを保持
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
     volcanoData.recentEruptions = volcanoData.recentEruptions.filter(e => {
         if (e.time === '【システム警告】') return false;
@@ -121,13 +126,11 @@ async function main() {
           const detailParser = new xml2js.Parser();
           const detailParsed = await detailParser.parseStringPromise(detailXml);
 
-          // 【改修・最重要】気象庁のXMLから有効期限を抽出
           const head = detailParsed.Report?.Head?.[0];
           if (head?.ValidDateTime?.[0]) {
               volcanoData.validUntil = head.ValidDateTime[0];
               console.log(`✅ 気象庁の有効期限を取得: ${volcanoData.validUntil}`);
           } else if (head?.ReportDateTime?.[0]) {
-              // 取得できない場合のフェイルセーフ: 発表時刻から+6時間を有効期限とする
               const repTime = new Date(head.ReportDateTime[0]);
               volcanoData.validUntil = new Date(repTime.getTime() + 6 * 60 * 60 * 1000).toISOString();
               console.log(`⚠️ 有効期限不明のためフェイルセーフを適用: ${volcanoData.validUntil}`);
@@ -169,25 +172,21 @@ async function main() {
       }
   }
 
-  // 【改修】警告フラグを「有効期限」ベースで厳格に判定する
   const now = new Date();
   let warningActive = false;
 
-  // 1. 気象庁の有効期限（16時など）を過ぎていないか？
   if (volcanoData.validUntil) {
       if (now <= new Date(volcanoData.validUntil)) {
           warningActive = true;
       }
   }
 
-  // 2. フェイルセーフ: 過去6時間以内に「噴火」または「爆発」が起きていれば強制的に警告
   const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
   const hasRecentEruption = volcanoData.recentEruptions.some(e => {
       const d = new Date(e.time);
       return d >= sixHoursAgo && (e.title.includes('噴火') || e.title.includes('爆発'));
   });
 
-  // いずれかの条件を満たせば「降灰あり（警戒）」を維持する
   volcanoData.hasAshfallWarning = warningActive || hasRecentEruption;
 
   console.log('取得中: Open-Meteo 上空風データ (80m & 1000m)...');
