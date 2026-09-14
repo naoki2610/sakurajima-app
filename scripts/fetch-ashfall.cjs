@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const xml2js = require('xml2js');
 
-// 頑健なネットワーク通信関数（3回まで自動リトライ）
 async function fetchWithRetry(url, options = {}, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -17,7 +16,6 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
   throw new Error(`通信に完全に失敗しました: ${url}`);
 }
 
-// 複雑な気象庁XMLから降灰エリア（AshFallItem）を再帰的に探し出す関数
 function findAshFallItems(obj, items = []) {
   if (!obj) return items;
   if (typeof obj === 'object') {
@@ -55,7 +53,8 @@ async function main() {
   let volcanoData = {
     hasAshfallWarning: false,
     ashfallGeoJson: { type: "FeatureCollection", features: [] },
-    recentEruptions: existingEruptions
+    recentEruptions: existingEruptions,
+    validUntil: null // 【新規】気象庁の予報有効期限を保持
   };
 
   const jmaHeaders = {
@@ -75,12 +74,10 @@ async function main() {
     
     const entries = result.feed?.entry || [];
     for (const entry of entries) {
-       // 【修正点】タイトルだけでなく、本文（content）も全て文字列として連結し、徹底的に「桜島」を検索する
        const eTitle = entry.title ? entry.title[0] : "";
        const eContent = entry.content ? JSON.stringify(entry.content) : "";
        const combinedText = eTitle + eContent;
 
-       // 桜島に関連し、かつ火山に関する情報であるかを判定
        if (combinedText.includes('桜島') && (eTitle.includes('火山') || eTitle.includes('降灰'))) {
            const eTime = entry.updated ? entry.updated[0] : null;
            
@@ -97,30 +94,25 @@ async function main() {
        }
     }
     
-    // 過去3時間以内のデータのみを残すフィルター処理
-    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    // 【改修】早すぎる履歴リセットを撤廃し「過去12時間分」を確実に保持する
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
     volcanoData.recentEruptions = volcanoData.recentEruptions.filter(e => {
         if (e.time === '【システム警告】') return false;
         if (e.time === '不明') return false;
         const eDate = new Date(e.time);
-        return eDate >= threeHoursAgo;
+        return eDate >= twelveHoursAgo;
     });
     volcanoData.recentEruptions.sort((a, b) => new Date(b.time) - new Date(a.time));
 
-    if (volcanoData.recentEruptions.length > 0) {
-        volcanoData.hasAshfallWarning = true;
-    }
-
   } catch (error) {
     console.error(`❌ 気象庁基本データの取得エラー: ${error.message}`);
-    volcanoData.hasAshfallWarning = true;
     volcanoData.recentEruptions.unshift({
         time: "【システム警告】",
-        title: "気象庁データの取得に失敗しました。過去3時間のデータが最新ではない可能性があります。"
+        title: "気象庁データの取得に失敗しました。"
     });
   }
 
-  // 詳細な予測降灰エリアデータの取得とGeoJSON変換
+  // 詳細データの取得と「有効期限(ValidDateTime)」の解析
   if (forecastUrl) {
       console.log(`詳細な降灰予報エリアデータを取得・解析します: ${forecastUrl}`);
       try {
@@ -129,8 +121,19 @@ async function main() {
           const detailParser = new xml2js.Parser();
           const detailParsed = await detailParser.parseStringPromise(detailXml);
 
+          // 【改修・最重要】気象庁のXMLから有効期限を抽出
+          const head = detailParsed.Report?.Head?.[0];
+          if (head?.ValidDateTime?.[0]) {
+              volcanoData.validUntil = head.ValidDateTime[0];
+              console.log(`✅ 気象庁の有効期限を取得: ${volcanoData.validUntil}`);
+          } else if (head?.ReportDateTime?.[0]) {
+              // 取得できない場合のフェイルセーフ: 発表時刻から+6時間を有効期限とする
+              const repTime = new Date(head.ReportDateTime[0]);
+              volcanoData.validUntil = new Date(repTime.getTime() + 6 * 60 * 60 * 1000).toISOString();
+              console.log(`⚠️ 有効期限不明のためフェイルセーフを適用: ${volcanoData.validUntil}`);
+          }
+
           const ashFallItems = findAshFallItems(detailParsed);
-          
           ashFallItems.forEach(item => {
               let amount = "不明";
               const jsonStr = JSON.stringify(item);
@@ -161,17 +164,36 @@ async function main() {
                   }
               }
           });
-          console.log(`✅ 降灰エリアのポリゴン抽出に成功しました (エリア数: ${volcanoData.ashfallGeoJson.features.length})`);
       } catch (err) {
-          console.log(`⚠️ 降灰予報エリアデータの解析に失敗しましたが、処理を継続します: ${err.message}`);
+          console.log(`⚠️ 降灰予報エリアデータの解析に失敗: ${err.message}`);
       }
   }
+
+  // 【改修】警告フラグを「有効期限」ベースで厳格に判定する
+  const now = new Date();
+  let warningActive = false;
+
+  // 1. 気象庁の有効期限（16時など）を過ぎていないか？
+  if (volcanoData.validUntil) {
+      if (now <= new Date(volcanoData.validUntil)) {
+          warningActive = true;
+      }
+  }
+
+  // 2. フェイルセーフ: 過去6時間以内に「噴火」または「爆発」が起きていれば強制的に警告
+  const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+  const hasRecentEruption = volcanoData.recentEruptions.some(e => {
+      const d = new Date(e.time);
+      return d >= sixHoursAgo && (e.title.includes('噴火') || e.title.includes('爆発'));
+  });
+
+  // いずれかの条件を満たせば「降灰あり（警戒）」を維持する
+  volcanoData.hasAshfallWarning = warningActive || hasRecentEruption;
 
   console.log('取得中: Open-Meteo 上空風データ (80m & 1000m)...');
   let hourlyForecast = [];
   try {
     const weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=31.5969&longitude=130.5571&hourly=temperature_2m,surface_pressure,wind_speed_80m,wind_direction_80m,wind_speed_1000hPa,wind_direction_1000hPa,weather_code&timezone=Asia%2FTokyo&past_days=1';
-    
     const wRes = await fetchWithRetry(weatherUrl, {}, 3);
     const wData = await wRes.json();
 
@@ -184,7 +206,6 @@ async function main() {
       return { icon: '⚡', text: '雷雨' };
     };
 
-    const now = new Date();
     const currentHour = now.getHours();
     let startIndex = wData.hourly.time.findIndex(t => new Date(t).getHours() === currentHour && new Date(t).getDate() === now.getDate());
     if (startIndex === -1) startIndex = 24;
@@ -212,9 +233,7 @@ async function main() {
 
   if (hourlyForecast.length === 0) {
       for (let i = -3; i <= 3; i++) {
-          hourlyForecast.push({
-              time: '不明', offset: i, temp: 0, windSpeed: 0, windDir: 0, windSpeed1000m: 0, windDir1000m: 0, pressure: 1010, info: { icon: '⚠️', text: '取得失敗' }
-          });
+          hourlyForecast.push({ time: '不明', offset: i, temp: 0, windSpeed: 0, windDir: 0, windSpeed1000m: 0, windDir1000m: 0, pressure: 1010, info: { icon: '⚠️', text: '取得失敗' } });
       }
   }
 
