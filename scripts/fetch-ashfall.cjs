@@ -21,8 +21,9 @@ async function main() {
   const outDir = path.join(process.cwd(), 'public', 'data');
   const dataFile = path.join(outDir, 'dashboard_data.json');
 
-  // 【究極の改修1】初期化時に空にするのではなく、基盤となるデータ構造を定義
-  let volcanoData = {
+  // 【決定版・絶対死守の鉄則】
+  // まずローカル（同一ワークスペース内）に既存ファイルがあれば、それを最優先のベース（直近の状態）として読み込む
+  let previousData = {
     hasAshfallWarning: false,
     ashfallGeoJson: { type: "FeatureCollection", features: [] },
     recentEruptions: [],
@@ -30,20 +31,35 @@ async function main() {
     directionText: null
   };
 
-  // 【究極の改修2】本番環境から「噴火履歴」だけでなく「ポリゴン」も「方向」も全て完全復元する
+  if (fs.existsSync(dataFile)) {
+      try {
+          const rawLocal = fs.readFileSync(dataFile, 'utf8');
+          previousData = JSON.parse(rawLocal);
+          console.log(`✅ ローカルファイルから既存状態を確実にロードしました（ポリゴン数: ${previousData.ashfallGeoJson?.features?.length || 0}）`);
+      } catch (e) {
+          console.log('⚠️ ローカルファイルのパースに失敗しました。');
+      }
+  }
+
+  // 次に本番環境からも最新の状態を同期試行（失敗してもローカルのpreviousDataがあるため絶対にデータが消えない）
   try {
       const timestamp = new Date().getTime();
       const liveRes = await fetch(`https://raw.githubusercontent.com/naoki2610/sakurajima-app/gh-pages/data/dashboard_data.json?t=${timestamp}`);
       if (liveRes.ok) {
           const parsed = await liveRes.json();
-          if (parsed.volcano) {
-              volcanoData = parsed.volcano;
-              console.log(`✅ 本番環境から状態を完全復元しました（保持ポリゴン数: ${volcanoData.ashfallGeoJson.features.length}）`);
+          if (parsed.volcano && parsed.volcano.ashfallGeoJson?.features?.length > 0) {
+              // 本番により新しいポリゴンがあればマージ、なければ既存を維持
+              if (previousData.ashfallGeoJson.features.length === 0) {
+                  previousData = parsed.volcano;
+                  console.log('✅ 本番環境から状態を補完しました。');
+              }
           }
       }
   } catch (e) {
-      console.log('⚠️ 本番環境からの復元スキップ（初回起動等）');
+      console.log('⚠️ 本番環境からの同期スキップ（ローカルデータを維持します）。');
   }
+
+  let volcanoData = previousData; // 既存の状態を引き継ぐ
 
   const jmaHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -92,13 +108,12 @@ async function main() {
     hasJmaError = true;
   }
 
-  // 一時的なデータ保管庫（新しいデータが見つかった場合のみ本番データを上書きする）
   let fetchedPolygons = [];
   let fetchedValidUntil = null;
   let fetchedDirection = null;
 
   if (forecastUrls.length > 0 && !hasJmaError) {
-      const targetUrls = [...new Set(forecastUrls)].slice(0, 2); // 最新2件のURLを解析
+      const targetUrls = [...new Set(forecastUrls)].slice(0, 2);
       
       for (const url of targetUrls) {
           try {
@@ -155,15 +170,17 @@ async function main() {
       }
   }
 
-  // 【究極の改修3】新しく取得できたデータがある場合のみ、復元した過去のデータを上書き更新する
-  if (fetchedPolygons.length > 0) volcanoData.ashfallGeoJson.features = fetchedPolygons;
+  // 新しいデータが取得できた場合のみ更新。取得できなかった場合は既存データを保持する
+  if (fetchedPolygons.length > 0) {
+      volcanoData.ashfallGeoJson.features = fetchedPolygons;
+  }
   if (fetchedValidUntil) volcanoData.validUntil = fetchedValidUntil;
   if (fetchedDirection) volcanoData.directionText = fetchedDirection;
 
-  // 【究極の改修4】気象庁の有効期限(ValidDateTime)を過ぎた場合のみ、地図と警告をクリアする
+  // 有効期限の厳格なチェック。期限切れのときのみクリアする
   const now = new Date();
   if (volcanoData.validUntil && now.getTime() > new Date(volcanoData.validUntil).getTime()) {
-      console.log(`ℹ️ 有効期限(${volcanoData.validUntil})を過ぎたため、降灰エリアと警告テキストをクリアします。`);
+      console.log(`ℹ️ 有効期限(${volcanoData.validUntil})を過ぎたため、降灰エリアと警告をクリアします。`);
       volcanoData.ashfallGeoJson.features = [];
       volcanoData.directionText = null;
       volcanoData.validUntil = null;
