@@ -226,14 +226,14 @@ export default function App() {
             
             {activeTab === 'menu1' && (
               <div>
-                {/* 【改修2】降灰方向テキストが存在する場合、地図のポリゴン有無に関わらず赤色で強制警告 */}
+                {/* 【究極の改修】降灰方向テキストを極めて目立つ緊急バナーとして最上部に強制表示 */}
                 {dashboardData.volcano.directionText && (
-                  <div style={{ marginBottom: '12px', backgroundColor: '#fee2e2', padding: '10px', borderRadius: '8px', border: '1px solid #ef4444' }}>
-                    <div style={{ fontWeight: 'bold', color: '#b91c1c', fontSize: '14px' }}>
-                      ⚠️ 降灰方向: {dashboardData.volcano.directionText}
+                  <div style={{ marginBottom: '12px', backgroundColor: '#fef2f2', padding: '12px', borderRadius: '8px', border: '2px solid #dc2626', boxShadow: '0 2px 4px rgba(220, 38, 38, 0.2)' }}>
+                    <div style={{ fontWeight: 'bold', color: '#b91c1c', fontSize: '15px', marginBottom: '4px' }}>
+                      ⚠️ 降灰警戒方向: {dashboardData.volcano.directionText}
                     </div>
-                    <div style={{ fontSize: '11px', color: '#991b1b', marginTop: '4px' }}>
-                       ※地図にエリアが表示されていない場合（速報段階）でも、上記方向へのフライト・屋外作業は警戒してください。
+                    <div style={{ fontSize: '11px', color: '#991b1b', lineHeight: '1.4' }}>
+                       ※地図にエリアが表示されていない速報段階でも、上記方向では屋外作業、UAVフライト、洗濯・洗車などの生活判断に十分警戒してください。
                     </div>
                   </div>
                 )}
