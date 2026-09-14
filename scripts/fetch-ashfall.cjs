@@ -64,7 +64,7 @@ async function main() {
       'Cache-Control': 'no-cache, no-store, must-revalidate'
   };
 
-  let forecastUrl = null; // 降灰予報の詳細データURL
+  let forecastUrl = null;
 
   try {
     console.log('取得中: 気象庁 高頻度フィード (eqvol.xml)...');
@@ -75,9 +75,14 @@ async function main() {
     
     const entries = result.feed?.entry || [];
     for (const entry of entries) {
-       if (entry.title && entry.title[0].includes('桜島')) {
+       // 【修正点】タイトルだけでなく、本文（content）も全て文字列として連結し、徹底的に「桜島」を検索する
+       const eTitle = entry.title ? entry.title[0] : "";
+       const eContent = entry.content ? JSON.stringify(entry.content) : "";
+       const combinedText = eTitle + eContent;
+
+       // 桜島に関連し、かつ火山に関する情報であるかを判定
+       if (combinedText.includes('桜島') && (eTitle.includes('火山') || eTitle.includes('降灰'))) {
            const eTime = entry.updated ? entry.updated[0] : null;
-           const eTitle = entry.title[0];
            
            if (eTime) {
                const isDuplicate = volcanoData.recentEruptions.some(e => e.time === eTime && e.title === eTitle);
@@ -86,7 +91,6 @@ async function main() {
                }
            }
 
-           // 【Step 2改修】降灰予報のURLを抽出する
            if (eTitle.includes('降灰予報') && !forecastUrl) {
                forecastUrl = entry.link[0].$.href;
            }
@@ -116,7 +120,7 @@ async function main() {
     });
   }
 
-  // 【Step 2改修】詳細な予測降灰エリアデータの取得とGeoJSON変換
+  // 詳細な予測降灰エリアデータの取得とGeoJSON変換
   if (forecastUrl) {
       console.log(`詳細な降灰予報エリアデータを取得・解析します: ${forecastUrl}`);
       try {
@@ -128,15 +132,12 @@ async function main() {
           const ashFallItems = findAshFallItems(detailParsed);
           
           ashFallItems.forEach(item => {
-              // 降灰量の判定（多量、やや多量、少量）
               let amount = "不明";
               const jsonStr = JSON.stringify(item);
               if (jsonStr.includes('多量')) amount = "多量";
               else if (jsonStr.includes('やや多量')) amount = "やや多量";
               else if (jsonStr.includes('少量')) amount = "少量";
 
-              // 座標（Polygon）の抽出とGeoJSON化
-              // 気象庁の座標は "緯度 経度 緯度 経度..." の順（例: "31.5 130.6 31.6 130.7"）
               const posListMatch = jsonStr.match(/"gml:posList":\["([^"]+)"\]/);
               if (posListMatch && posListMatch[1] && amount !== "不明") {
                   const coordsRaw = posListMatch[1].trim().split(/\s+/);
@@ -144,19 +145,13 @@ async function main() {
                   for (let i = 0; i < coordsRaw.length; i += 2) {
                       const lat = parseFloat(coordsRaw[i]);
                       const lon = parseFloat(coordsRaw[i + 1]);
-                      if (!isNaN(lat) && !isNaN(lon)) {
-                          // GeoJSONは [経度, 緯度] の順
-                          coordinates.push([lon, lat]);
-                      }
+                      if (!isNaN(lat) && !isNaN(lon)) coordinates.push([lon, lat]);
                   }
                   
                   if (coordinates.length > 2) {
-                      // GeoJSONの仕様として、始点と終点を一致させる
                       const firstNode = coordinates[0];
                       const lastNode = coordinates[coordinates.length - 1];
-                      if (firstNode[0] !== lastNode[0] || firstNode[1] !== lastNode[1]) {
-                          coordinates.push(firstNode);
-                      }
+                      if (firstNode[0] !== lastNode[0] || firstNode[1] !== lastNode[1]) coordinates.push(firstNode);
 
                       volcanoData.ashfallGeoJson.features.push({
                           type: "Feature",
