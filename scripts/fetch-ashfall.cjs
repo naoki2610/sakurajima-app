@@ -16,50 +16,14 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
   throw new Error(`通信に完全に失敗しました: ${url}`);
 }
 
-function findValuesByKey(obj, searchKey, results = []) {
-    if (!obj) return results;
-    if (typeof obj === 'object') {
-        for (let key in obj) {
-            if (key.includes(searchKey)) {
-                results.push(obj[key]);
-            } else {
-                findValuesByKey(obj[key], searchKey, results);
-            }
-        }
-    }
-    return results;
-}
-
-function findAshFallItems(obj, items = []) {
-  if (!obj) return items;
-  if (typeof obj === 'object') {
-      for (let key in obj) {
-          if (key.includes('Item') && typeof obj[key] === 'object') {
-               const itemArr = Array.isArray(obj[key]) ? obj[key] : [obj[key]];
-               itemArr.forEach(i => {
-                   const str = JSON.stringify(i);
-                   if(str.includes('多量') || str.includes('やや多量') || str.includes('少量')){
-                       items.push(i);
-                   }
-               });
-          } else {
-              findAshFallItems(obj[key], items);
-          }
-      }
-  }
-  return items;
-}
-
 async function main() {
   console.log('🌐 総合防災データの収集を開始します...');
-
   const outDir = path.join(process.cwd(), 'public', 'data');
   const dataFile = path.join(outDir, 'dashboard_data.json');
 
   let existingEruptions = [];
   try {
       const timestamp = new Date().getTime();
-      // 【改修3】CDNのキャッシュ遅延を回避するため、リポジトリの生データ(Raw)を直接参照する
       const liveRes = await fetch(`https://raw.githubusercontent.com/naoki2610/sakurajima-app/gh-pages/data/dashboard_data.json?t=${timestamp}`);
       if (liveRes.ok) {
           const parsed = await liveRes.json();
@@ -68,14 +32,15 @@ async function main() {
           }
       }
   } catch (e) {
-      console.log('⚠️ 本番環境からのデータ復元をスキップします。');
+      console.log('⚠️ 本番環境からの復元スキップ');
   }
 
   let volcanoData = {
     hasAshfallWarning: false,
     ashfallGeoJson: { type: "FeatureCollection", features: [] },
     recentEruptions: existingEruptions,
-    validUntil: null
+    validUntil: null,
+    directionText: null
   };
 
   const jmaHeaders = {
@@ -84,8 +49,8 @@ async function main() {
       'Cache-Control': 'no-cache, no-store, must-revalidate'
   };
 
-  let forecastUrl = null;
-  let hasJmaError = false; // 【改修1,2】エラー発生状態を正確に管理するフラグ
+  let forecastUrls = [];
+  let hasJmaError = false;
 
   try {
     console.log('取得中: 気象庁 高頻度フィード (eqvol.xml)...');
@@ -100,128 +65,121 @@ async function main() {
        const eContent = entry.content ? JSON.stringify(entry.content) : "";
        const combinedText = eTitle + eContent;
 
-       // 【改修4】「警報」も条件に追加し、重大な見落としを防止
        if (combinedText.includes('桜島') && (eTitle.includes('火山') || eTitle.includes('降灰') || eTitle.includes('警報'))) {
            const eTime = entry.updated ? entry.updated[0] : null;
-           
            if (eTime) {
-               // 【改修5】時刻(eTime)のみで重複判定を行い、タイトルの微細な変更による二重登録を防ぐ
-               const isDuplicate = volcanoData.recentEruptions.some(e => e.time === eTime);
-               if (!isDuplicate) {
+               if (!volcanoData.recentEruptions.some(e => e.time === eTime)) {
                    volcanoData.recentEruptions.push({ time: eTime, title: eTitle });
                }
            }
-
-           if (eTitle.includes('降灰予報') && !forecastUrl) {
-               forecastUrl = entry.link[0].$.href;
+           if (eTitle.includes('降灰予報')) {
+               forecastUrls.push(entry.link[0].$.href); // 全ての降灰予報URLを保持
            }
        }
     }
     
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
     volcanoData.recentEruptions = volcanoData.recentEruptions.filter(e => {
-        if (e.time === '【システム警告】') return false;
-        if (e.time === '不明') return false;
-        const eDate = new Date(e.time);
-        return eDate >= twelveHoursAgo;
+        if (e.time === '【システム警告】' || e.time === '不明') return false;
+        return new Date(e.time) >= twelveHoursAgo;
     });
     volcanoData.recentEruptions.sort((a, b) => new Date(b.time) - new Date(a.time));
 
   } catch (error) {
     console.error(`❌ 気象庁基本データの取得エラー: ${error.message}`);
-    hasJmaError = true; // エラー発生フラグを立てる
-    volcanoData.recentEruptions.unshift({
-        time: "【システム警告】",
-        title: "気象庁データの取得に失敗しました。安全のため警戒状態を維持します。"
-    });
+    hasJmaError = true;
   }
 
-  if (forecastUrl && !hasJmaError) {
-      console.log(`詳細な降灰予報エリアデータを取得・解析します: ${forecastUrl}`);
-      try {
-          const detailRes = await fetchWithRetry(forecastUrl, { headers: jmaHeaders }, 3);
-          const detailXml = await detailRes.text();
-          const detailParser = new xml2js.Parser({ explicitArray: true });
-          const detailParsed = await detailParser.parseStringPromise(detailXml);
+  // 【究極の改修】XMLパーサーを捨て、Rawテキストから正規表現で強引かつ確実にデータを引っこ抜く
+  if (forecastUrls.length > 0 && !hasJmaError) {
+      // 最新の速報と詳細を両方解析するため、新しい順に最大2件処理する
+      const targetUrls = [...new Set(forecastUrls)].slice(0, 2);
+      
+      for (const url of targetUrls) {
+          try {
+              const res = await fetchWithRetry(url, { headers: jmaHeaders }, 3);
+              const rawXml = await res.text();
+              
+              // 1. 有効期限 (ValidDateTime) の確実な抽出
+              if (!volcanoData.validUntil) {
+                  const validMatch = rawXml.match(/<[^>]*ValidDateTime>([^<]+)<\//);
+                  if (validMatch) volcanoData.validUntil = validMatch[1].trim();
+              }
 
-          const head = findValuesByKey(detailParsed, 'Head')[0];
-          if (head && head.ValidDateTime && head.ValidDateTime[0]) {
-              volcanoData.validUntil = head.ValidDateTime[0];
-          } else if (head && head.ReportDateTime && head.ReportDateTime[0]) {
-              const repTime = new Date(head.ReportDateTime[0]);
-              volcanoData.validUntil = new Date(repTime.getTime() + 6 * 60 * 60 * 1000).toISOString();
-          }
+              // 2. 降灰方向テキストの確実な抽出
+              if (!volcanoData.directionText) {
+                  // 「火口から北方向（姶良市加治木方向）に火山灰が流され」等を取得
+                  const textMatch = rawXml.match(/火口から([^<。]+方向[^<。]*)[にへ]火山灰が流され/);
+                  if (textMatch) {
+                      volcanoData.directionText = textMatch[1].trim();
+                  } else {
+                      // フォールバック: PlumeDirection属性から取得
+                      const pdMatch = rawXml.match(/<[^>]*PlumeDirection[^>]*description="([^"]+)"/);
+                      if (pdMatch) volcanoData.directionText = pdMatch[1].trim();
+                  }
+              }
 
-          const ashFallItems = findAshFallItems(detailParsed);
-          ashFallItems.forEach(item => {
-              let amount = "不明";
-              const jsonStr = JSON.stringify(item);
-              if (jsonStr.includes('多量')) amount = "多量";
-              else if (jsonStr.includes('やや多量')) amount = "やや多量";
-              else if (jsonStr.includes('少量')) amount = "少量";
+              // 3. 降灰ポリゴン座標の確実な抽出
+              // XMLを<Item>タグごとに分割して、個別に「量」と「座標」を判定する
+              const items = rawXml.split(/<[^>]*Item>/);
+              items.forEach(itemStr => {
+                  let amount = "不明";
+                  if (itemStr.includes('多量') && !itemStr.includes('やや多量')) amount = "多量";
+                  else if (itemStr.includes('やや多量')) amount = "やや多量";
+                  else if (itemStr.includes('少量')) amount = "少量";
 
-              const posLists = findValuesByKey(item, 'posList');
-              posLists.forEach(posListObj => {
-                  let coordsRawString = "";
-                  if (typeof posListObj === 'string') coordsRawString = posListObj;
-                  else if (Array.isArray(posListObj) && typeof posListObj[0] === 'string') coordsRawString = posListObj[0];
-                  else if (posListObj._) coordsRawString = posListObj._;
-
-                  if (coordsRawString && amount !== "不明") {
-                      const coordsRaw = coordsRawString.trim().split(/\s+/);
-                      let coordinates = [];
-                      for (let i = 0; i < coordsRaw.length; i += 2) {
-                          const lat = parseFloat(coordsRaw[i]);
-                          const lon = parseFloat(coordsRaw[i + 1]);
-                          if (!isNaN(lat) && !isNaN(lon)) coordinates.push([lon, lat]);
-                      }
-                      
-                      if (coordinates.length > 2) {
-                          const firstNode = coordinates[0];
-                          const lastNode = coordinates[coordinates.length - 1];
-                          if (firstNode[0] !== lastNode[0] || firstNode[1] !== lastNode[1]) {
-                              coordinates.push(firstNode);
+                  if (amount !== "不明") {
+                      // <gml:posList> 等の中身を全て抽出
+                      const posRegex = /<[^>]*posList>([^<]+)<\//g;
+                      let match;
+                      while ((match = posRegex.exec(itemStr)) !== null) {
+                          const raw = match[1].trim().split(/\s+/);
+                          let coords = [];
+                          for (let i = 0; i < raw.length; i += 2) {
+                              const lat = parseFloat(raw[i]);
+                              const lon = parseFloat(raw[i + 1]);
+                              if (!isNaN(lat) && !isNaN(lon)) coords.push([lon, lat]);
                           }
-                          volcanoData.ashfallGeoJson.features.push({
-                              type: "Feature",
-                              properties: { volcano: "桜島", amount: amount },
-                              geometry: { type: "Polygon", coordinates: [coordinates] }
-                          });
+                          if (coords.length > 2) {
+                              // ポリゴンを閉じる
+                              if (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1]) {
+                                  coords.push(coords[0]);
+                              }
+                              volcanoData.ashfallGeoJson.features.push({
+                                  type: "Feature", properties: { volcano: "桜島", amount: amount },
+                                  geometry: { type: "Polygon", coordinates: [coords] }
+                              });
+                          }
                       }
                   }
               });
-          });
-      } catch (err) {
-          console.log(`⚠️ 降灰予報エリアデータの解析に失敗: ${err.message}`);
+          } catch (err) {
+              console.log(`⚠️ 詳細XMLの解析エラー: ${err.message}`);
+          }
       }
+      console.log(`✅ 抽出完了: ポリゴン数 ${volcanoData.ashfallGeoJson.features.length}, 方向: ${volcanoData.directionText}`);
   }
 
   const now = new Date();
   let warningActive = false;
-
-  if (volcanoData.validUntil) {
-      if (now <= new Date(volcanoData.validUntil)) {
-          warningActive = true;
-      }
+  if (volcanoData.validUntil && now <= new Date(volcanoData.validUntil)) {
+      warningActive = true;
   }
-
   const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
   const hasRecentEruption = volcanoData.recentEruptions.some(e => {
-      if (e.time === '【システム警告】') return false; // Dateエラー回避
-      const d = new Date(e.time);
-      return d >= sixHoursAgo && (e.title.includes('噴火') || e.title.includes('爆発') || e.title.includes('警報'));
+      if (e.time === '【システム警告】') return false;
+      return new Date(e.time) >= sixHoursAgo && (e.title.includes('噴火') || e.title.includes('爆発') || e.title.includes('警報'));
   });
 
-  // 【改修1,2の完結】エラー発生時(hasJmaError)は強制的に警告(true)とするフェイルセーフ
-  volcanoData.hasAshfallWarning = hasJmaError || warningActive || hasRecentEruption;
+  volcanoData.hasAshfallWarning = hasJmaError || warningActive || hasRecentEruption || (volcanoData.directionText !== null);
 
+  // 天気情報の取得（省略せず記述）
   console.log('取得中: Open-Meteo 上空風データ (80m & 1000m)...');
   let hourlyForecast = [];
   try {
     const weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=31.5969&longitude=130.5571&hourly=temperature_2m,surface_pressure,wind_speed_80m,wind_direction_80m,wind_speed_1000hPa,wind_direction_1000hPa,weather_code&timezone=Asia%2FTokyo&past_days=1';
     const wRes = await fetchWithRetry(weatherUrl, {}, 3);
     const wData = await wRes.json();
-
     const getW = (code) => {
       if (code === 0) return { icon: '☀️', text: '快晴' };
       if (code <= 3) return { icon: '⛅', text: '晴れ/曇り' };
@@ -230,32 +188,24 @@ async function main() {
       if (code <= 82) return { icon: '⛄', text: '雪' };
       return { icon: '⚡', text: '雷雨' };
     };
-
     const currentHour = now.getHours();
     let startIndex = wData.hourly.time.findIndex(t => new Date(t).getHours() === currentHour && new Date(t).getDate() === now.getDate());
     if (startIndex === -1) startIndex = 24;
-
     for (let i = -3; i <= 3; i++) {
       const idx = startIndex + i;
       if (idx >= 0 && idx < wData.hourly.time.length) {
         const timeObj = new Date(wData.hourly.time[idx]);
         hourlyForecast.push({
-          time: `${timeObj.getHours()}:00`,
-          offset: i,
-          temp: Math.round(wData.hourly.temperature_2m[idx]),
-          windSpeed: Math.round(wData.hourly.wind_speed_80m[idx] * 10) / 10,
-          windDir: wData.hourly.wind_direction_80m[idx],
-          windSpeed1000m: Math.round(wData.hourly.wind_speed_1000hPa[idx] * 10) / 10,
-          windDir1000m: wData.hourly.wind_direction_1000hPa[idx],
-          pressure: wData.hourly.surface_pressure[idx],
-          info: getW(wData.hourly.weather_code[idx])
+          time: `${timeObj.getHours()}:00`, offset: i, temp: Math.round(wData.hourly.temperature_2m[idx]),
+          windSpeed: Math.round(wData.hourly.wind_speed_80m[idx] * 10) / 10, windDir: wData.hourly.wind_direction_80m[idx],
+          windSpeed1000m: Math.round(wData.hourly.wind_speed_1000hPa[idx] * 10) / 10, windDir1000m: wData.hourly.wind_direction_1000hPa[idx],
+          pressure: wData.hourly.surface_pressure[idx], info: getW(wData.hourly.weather_code[idx])
         });
       }
     }
   } catch (error) {
     console.log(`❌ 気象APIエラー: ${error.message}`);
   }
-
   if (hourlyForecast.length === 0) {
       for (let i = -3; i <= 3; i++) {
           hourlyForecast.push({ time: '不明', offset: i, temp: 0, windSpeed: 0, windDir: 0, windSpeed1000m: 0, windDir1000m: 0, pressure: 1010, info: { icon: '⚠️', text: '取得失敗' } });
@@ -267,10 +217,8 @@ async function main() {
     weather: { current: { temp: 0, humidity: 0, info: { icon: '', text: '' } }, daily: [] },
     hourlyForecast: hourlyForecast
   };
-
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(dataFile, JSON.stringify(finalData, null, 2));
   console.log('✅ データ更新が完了しました。');
 }
-
 main();
