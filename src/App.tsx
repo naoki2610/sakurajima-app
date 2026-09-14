@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// 【修正箇所】時間を日本時間（JST）の分かりやすい形式に変換する関数
 function formatJST(timeStr: string) {
   if (timeStr === '【システム警告】' || timeStr === '不明') return timeStr;
   try {
@@ -40,30 +39,16 @@ type DashboardData = {
       }[];
     };
     recentEruptions: { time: string; title: string }[];
+    validUntil?: string | null;
+    directionText?: string | null;
   };
   weather: {
-    current: {
-      temp: number;
-      humidity: number;
-      info: { icon: string; text: string };
-    };
-    daily: {
-      date: string;
-      info: { icon: string; text: string };
-      maxTemp: number;
-      minTemp: number;
-    }[];
+    current: { temp: number; humidity: number; info: { icon: string; text: string }; };
+    daily: { date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number; }[];
   };
   hourlyForecast?: {
-    time: string;
-    offset: number;
-    temp: number;
-    windSpeed: number;
-    windDir: number;
-    windSpeed1000m: number;
-    windDir1000m: number;
-    pressure: number;
-    info: { icon: string; text: string };
+    time: string; offset: number; temp: number; windSpeed: number; windDir: number;
+    windSpeed1000m: number; windDir1000m: number; pressure: number; info: { icon: string; text: string };
   }[];
 };
 
@@ -128,10 +113,8 @@ export default function App() {
                 const formattedDate = `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`;
                 
                 dailyForecasts.push({
-                  date: formattedDate,
-                  info: getWeatherInfo(weatherData.daily.weather_code[i]),
-                  maxTemp: Math.round(weatherData.daily.temperature_2m_max[i]),
-                  minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
+                  date: formattedDate, info: getWeatherInfo(weatherData.daily.weather_code[i]),
+                  maxTemp: Math.round(weatherData.daily.temperature_2m_max[i]), minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
                 });
               }
 
@@ -151,30 +134,20 @@ export default function App() {
               console.warn("現在地の天気取得に失敗しました。");
             }
           }, () => {
-             console.warn("位置情報の取得が拒否されたか失敗しました。");
+             console.warn("位置情報の取得が拒否されました。");
           });
         }
 
         if (data.volcano && data.volcano.ashfallGeoJson) {
             map.current.addSource('ashfall-data', {
-              type: 'geojson',
-              data: data.volcano.ashfallGeoJson,
+              type: 'geojson', data: data.volcano.ashfallGeoJson,
             });
-
             map.current.addLayer({
-              id: 'ashfall-fill',
-              type: 'fill',
-              source: 'ashfall-data',
-              paint: {
-                'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'],
-                'fill-opacity': 0.55,
-              },
+              id: 'ashfall-fill', type: 'fill', source: 'ashfall-data',
+              paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 },
             });
-
             map.current.addLayer({
-              id: 'ashfall-line',
-              type: 'line',
-              source: 'ashfall-data',
+              id: 'ashfall-line', type: 'line', source: 'ashfall-data',
               paint: { 'line-color': '#475569', 'line-width': 2 },
             });
         }
@@ -184,10 +157,7 @@ export default function App() {
     });
 
     return () => {
-      if (map.current) {
-        map.current.remove();
-        map.current = null;
-      }
+      if (map.current) { map.current.remove(); map.current = null; }
     };
   }, []);
 
@@ -215,12 +185,11 @@ export default function App() {
 
   const hourlyData = dashboardData?.hourlyForecast || fallbackHourly;
   const currentSlideData = hourlyData[timeIndex];
-  
   const prevPressure = timeIndex > 0 ? hourlyData[timeIndex - 1].pressure : currentSlideData.pressure;
   const pressureDiff = currentSlideData.pressure - prevPressure;
   let trendMsg = { text: "気圧安定", color: '#10b981' };
-  if (pressureDiff <= -1.0) trendMsg = { text: "気圧低下中（天候悪化・突風注意）", color: '#ef4444' };
-  if (pressureDiff >= 1.0) trendMsg = { text: "気圧上昇中（天候回復傾向）", color: '#3b82f6' };
+  if (pressureDiff <= -1.0) trendMsg = { text: "気圧低下中（突風注意）", color: '#ef4444' };
+  if (pressureDiff >= 1.0) trendMsg = { text: "気圧上昇中", color: '#3b82f6' };
 
   return (
     <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, position: 'absolute', top: 0, left: 0 }}>
@@ -231,7 +200,7 @@ export default function App() {
         backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '15px 20px',
         borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
         fontFamily: '"Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif',
-        width: '330px'
+        width: '330px', maxHeight: '90vh', overflowY: 'auto'
       }}>
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
           🌋 桜島 生活・防災モニター
@@ -251,28 +220,37 @@ export default function App() {
         </div>
 
         {!dashboardData ? (
-          <div style={{ minHeight: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
-            最新データを取得中...
-          </div>
+          <div style={{ minHeight: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>最新データを取得中...</div>
         ) : (
           <div style={{ minHeight: '200px' }}>
             
             {activeTab === 'menu1' && (
               <div>
+                {/* 【改修2】降灰方向テキストが存在する場合、地図のポリゴン有無に関わらず赤色で強制警告 */}
+                {dashboardData.volcano.directionText && (
+                  <div style={{ marginBottom: '12px', backgroundColor: '#fee2e2', padding: '10px', borderRadius: '8px', border: '1px solid #ef4444' }}>
+                    <div style={{ fontWeight: 'bold', color: '#b91c1c', fontSize: '14px' }}>
+                      ⚠️ 降灰方向: {dashboardData.volcano.directionText}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#991b1b', marginTop: '4px' }}>
+                       ※地図にエリアが表示されていない場合（速報段階）でも、上記方向へのフライト・屋外作業は警戒してください。
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ marginBottom: '12px', backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px' }}>
                   <div style={{ fontSize: '14px', marginBottom: '6px', color: '#334155' }}>👕 <b>洗濯予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().laundry}</span></div>
                   <div style={{ fontSize: '14px', color: '#334155' }}>🚗 <b>洗車予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().car}</span></div>
                 </div>
                 
                 <div style={{ marginBottom: '12px', backgroundColor: '#fff7ed', padding: '10px', borderRadius: '8px', border: '1px solid #ffedd5' }}>
-                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 過去3時間の噴火履歴</p>
+                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 過去12時間の噴火履歴</p>
                   <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#431407', lineHeight: '1.5', maxHeight: '100px', overflowY: 'auto' }}>
                     {dashboardData.volcano.recentEruptions.length === 0 ? (
-                      <li>過去3時間の噴火は観測されていません</li>
+                      <li>直近の噴火は観測されていません</li>
                     ) : (
                       dashboardData.volcano.recentEruptions.map((eruption, idx) => (
                         <li key={idx} style={{ marginBottom: '6px', borderBottom: '1px dashed #fed7aa', paddingBottom: '4px' }}>
-                          {/* 【修正箇所】ここで formatJST 関数を通し、完全に日本時間（例: 9/14 11:48）として表示させます */}
                           <div style={{ fontWeight: 'bold', color: '#9a3412', fontSize: '13px' }}>{formatJST(eruption.time)}</div>
                           <div>{eruption.title}</div>
                         </li>
@@ -292,7 +270,6 @@ export default function App() {
               </div>
             )}
 
-            {/* 以下 menu2, menu3, menu4 は変更なし */}
             {activeTab === 'menu2' && (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px', backgroundColor: '#f0f9ff', padding: '15px', borderRadius: '8px' }}>
@@ -347,41 +324,20 @@ export default function App() {
                   </div>
                   <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                     <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>ドローン(80m)</div>
-                    <div style={{ 
-                      fontSize: '22px', color: '#0f172a', 
-                      transform: `rotate(${currentSlideData.windDir + 180}deg)`,
-                      transition: 'transform 0.3s ease',
-                      display: 'inline-block'
-                    }}>
-                      ⬆
-                    </div>
+                    <div style={{ fontSize: '22px', color: '#0f172a', transform: `rotate(${currentSlideData.windDir + 180}deg)`, transition: 'transform 0.3s ease', display: 'inline-block' }}>⬆</div>
                     <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed} <span style={{fontSize: '9px'}}>m/s</span></div>
                   </div>
                   <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                     <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>桜島火口(1000m)</div>
-                    <div style={{ 
-                      fontSize: '22px', color: '#e11d48',
-                      transform: `rotate(${currentSlideData.windDir1000m + 180}deg)`,
-                      transition: 'transform 0.3s ease',
-                      display: 'inline-block'
-                    }}>
-                      ⬆
-                    </div>
+                    <div style={{ fontSize: '22px', color: '#e11d48', transform: `rotate(${currentSlideData.windDir1000m + 180}deg)`, transition: 'transform 0.3s ease', display: 'inline-block' }}>⬆</div>
                     <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed1000m} <span style={{fontSize: '9px'}}>m/s</span></div>
                   </div>
                 </div>
 
                 <div style={{ marginTop: '10px', padding: '0 5px' }}>
-                  <input 
-                    type="range" min="0" max="6" step="1" 
-                    value={timeIndex} 
-                    onChange={(e) => setTimeIndex(Number(e.target.value))} 
-                    style={{ width: '100%', cursor: 'pointer' }}
-                  />
+                  <input type="range" min="0" max="6" step="1" value={timeIndex} onChange={(e) => setTimeIndex(Number(e.target.value))} style={{ width: '100%', cursor: 'pointer' }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', marginTop: '5px' }}>
-                    <span>-3h</span>
-                    <span style={{ fontWeight: timeIndex === 3 ? 'bold' : 'normal', color: timeIndex === 3 ? '#0f172a' : '#64748b' }}>現在</span>
-                    <span>+3h</span>
+                    <span>-3h</span><span style={{ fontWeight: timeIndex === 3 ? 'bold' : 'normal', color: timeIndex === 3 ? '#0f172a' : '#64748b' }}>現在</span><span>+3h</span>
                   </div>
                 </div>
               </div>
