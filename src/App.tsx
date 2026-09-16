@@ -17,12 +17,10 @@ function formatJST(timeStr: string) {
   }
 }
 
-// 【100%修正1】気温（temp）を加味し、気温が高い時の「雪・霰」コードを「雨」に強制補正する
 function getWeatherInfo(code: number, temp?: number) {
   let isSnow = false;
   if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) isSnow = true;
   
-  // 鹿児島で気温10度以上なのに雪コードが来た場合は、APIの異常値（雹・霰など）として「雨」に補正
   if (isSnow && temp !== undefined && temp >= 10) {
      return { icon: '☔', text: '雨(雹/霰)' };
   }
@@ -37,8 +35,11 @@ function getWeatherInfo(code: number, temp?: number) {
   return { icon: '☁️', text: '不明' };
 }
 
-// 【100%修正2】「鹿屋市輝北」などの地名に含まれる方角漢字の誤検知を完全に防ぐ
+// 【真の100%修正】抽出した mainDir を使って厳格に方角を判定する
 function getFallbackWedgeGeoJson(directionText: string) {
+  // 括弧より前の「主方向」だけを抽出・空白除去（例: "東（鹿屋市輝北方向）" -> "東"）
+  const mainDir = directionText.split(/[（(]/)[0].trim();
+  
   const dirs = [
     { k: '北北東', v: 22.5 }, { k: '東北東', v: 67.5 }, { k: '東南東', v: 112.5 }, { k: '南南東', v: 157.5 },
     { k: '南南西', v: 202.5 }, { k: '西南西', v: 247.5 }, { k: '西北西', v: 292.5 }, { k: '北北西', v: 337.5 },
@@ -47,10 +48,9 @@ function getFallbackWedgeGeoJson(directionText: string) {
   ];
   
   let angle = null;
-  // 確実な方角抽出：「〇〇方向」の直前にある方角文字列だけを狙い撃つ
   for (const d of dirs) {
-    // 例: "東方向" または テキストの先頭が "東" で始まる場合のみマッチ
-    if (directionText.includes(d.k + '方向') || directionText.startsWith(d.k)) {
+    // 古い directionText ではなく、純粋な方角のみの mainDir を比較する！
+    if (mainDir === d.k || mainDir.includes(d.k + '方向')) {
       angle = d.v;
       break;
     }
@@ -159,7 +159,6 @@ export default function App() {
                   const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
                   
                   const maxT = Math.round(weatherData.daily.temperature_2m_max[i]);
-                  // 最高気温を渡して異常な雪マークを雨に補正する
                   const weatherInfo = getWeatherInfo(weatherData.daily.weather_code[i], maxT);
 
                   dailyForecasts.push({
@@ -183,7 +182,7 @@ export default function App() {
                         time: `${d.getHours()}:00`,
                         temp: tTemp,
                         pop: weatherData.hourly.precipitation_probability[idx] || 0,
-                        info: getWeatherInfo(weatherData.hourly.weather_code[idx], tTemp) // ここでも気温補正
+                        info: getWeatherInfo(weatherData.hourly.weather_code[idx], tTemp)
                       });
                     }
                   }
@@ -207,10 +206,11 @@ export default function App() {
             }
         };
 
+        // GPSフォールバック機能（日置市中心部へフォールバック）
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
             (position) => { fetchAndMergeWeather(position.coords.latitude, position.coords.longitude); }, 
-            (error) => { fetchAndMergeWeather(31.628, 130.396); }, // 日置市フォールバック
+            (error) => { fetchAndMergeWeather(31.628, 130.396); },
             { timeout: 5000 }
           );
         } else {
