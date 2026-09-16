@@ -27,9 +27,7 @@ function getWeatherInfo(code: number) {
   return { icon: '☁️', text: '不明' };
 }
 
-// 【究極のUI改修】文字情報（「北方向」など）から、地図上に描画するための扇形ポリゴンを動的生成する関数
 function getFallbackWedgeGeoJson(directionText: string) {
-  // 長い文字列（詳細な方角）から順にマッチングさせる
   const dirs = [
     { k: '北北東', v: 22.5 }, { k: '東北東', v: 67.5 }, { k: '東南東', v: 112.5 }, { k: '南南東', v: 157.5 },
     { k: '南南西', v: 202.5 }, { k: '西南西', v: 247.5 }, { k: '西北西', v: 292.5 }, { k: '北北西', v: 337.5 },
@@ -43,22 +41,21 @@ function getFallbackWedgeGeoJson(directionText: string) {
   }
   if (angle === null) return null;
 
-  const center = [130.657, 31.580]; // 桜島の座標
-  const radiusKm = 50; // 警戒エリアの半径（約50km）
+  const center = [130.657, 31.580]; 
+  const radiusKm = 50; 
   const coords = [center];
   
-  // kmを緯度経度の度数に概算変換
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
 
-  const spread = 25; // 扇形の広がり角（±25度）
+  const spread = 25; 
   for (let i = angle - spread; i <= angle + spread; i += 5) {
     const rad = i * Math.PI / 180;
     const dLat = radiusKm * Math.cos(rad) * latPerKm;
     const dLon = radiusKm * Math.sin(rad) * lonPerKm;
     coords.push([center[0] + dLon, center[1] + dLat]);
   }
-  coords.push(center); // ポリゴンを閉じる
+  coords.push(center); 
 
   return {
     type: 'FeatureCollection',
@@ -81,6 +78,8 @@ type DashboardData = {
   weather: {
     current: { temp: number; humidity: number; info: { icon: string; text: string }; };
     daily: { date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number; }[];
+    // 【新規】スマートフォンの現在地専用の1時間ごとの詳細予報
+    localHourly?: { time: string; temp: number; pop: number; info: { icon: string; text: string }; }[];
   };
   hourlyForecast?: {
     time: string; offset: number; temp: number; windSpeed: number; windDir: number;
@@ -137,7 +136,8 @@ export default function App() {
           navigator.geolocation.getCurrentPosition(async (position) => {
             const { latitude, longitude } = position.coords;
             try {
-              const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
+              // 【改修】現在地の天気取得APIを拡張し、1時間ごとの詳細予報（hourly）と降水確率（precipitation_probability）を追加
+              const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
               const weatherData = await weatherRes.json();
               
               const dailyForecasts: any[] = [];
@@ -152,6 +152,26 @@ export default function App() {
                 });
               }
 
+              // 【新規】現在時刻を基準に、向こう12時間分の現在地ピンポイント予報を生成
+              const nowTime = new Date().getTime();
+              const startIndex = weatherData.hourly.time.findIndex((t: string) => new Date(t).getTime() > nowTime - 3600000);
+              const localHourlyData = [];
+              
+              if (startIndex !== -1) {
+                for (let i = 0; i < 12; i++) {
+                  const idx = startIndex + i;
+                  if (idx < weatherData.hourly.time.length) {
+                    const d = new Date(weatherData.hourly.time[idx]);
+                    localHourlyData.push({
+                      time: `${d.getHours()}:00`,
+                      temp: Math.round(weatherData.hourly.temperature_2m[idx]),
+                      pop: weatherData.hourly.precipitation_probability[idx] || 0, // 降水確率
+                      info: getWeatherInfo(weatherData.hourly.weather_code[idx])
+                    });
+                  }
+                }
+              }
+
               setDashboardData(prev => prev ? {
                 ...prev,
                 weather: {
@@ -161,7 +181,8 @@ export default function App() {
                     humidity: weatherData.current.relative_humidity_2m,
                     info: getWeatherInfo(weatherData.current.weather_code)
                   },
-                  daily: dailyForecasts
+                  daily: dailyForecasts,
+                  localHourly: localHourlyData // 保存
                 }
               } : null);
             } catch (e) {
@@ -172,11 +193,9 @@ export default function App() {
           });
         }
 
-        // 【地図描画ロジックの改修】
         let mapGeoJson = data.volcano.ashfallGeoJson;
         let isFallbackWedge = false;
         
-        // 気象庁の正式ポリゴンが無く、かつ方向テキストがある場合（速報段階）に扇形を生成
         if ((!mapGeoJson || mapGeoJson.features.length === 0) && data.volcano.directionText) {
             const wedgeGeoJson = getFallbackWedgeGeoJson(data.volcano.directionText);
             if (wedgeGeoJson) {
@@ -190,7 +209,6 @@ export default function App() {
             map.current.addLayer({
               id: 'ashfall-fill', type: 'fill', source: 'ashfall-data',
               paint: { 
-                // フォールバックの扇形は目立つ赤色の半透明。正式データは降灰量に応じた色分け。
                 'fill-color': isFallbackWedge ? '#dc2626' : ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 
                 'fill-opacity': isFallbackWedge ? 0.25 : 0.55 
               },
@@ -319,6 +337,7 @@ export default function App() {
               </div>
             )}
 
+            {/* 【改修】②現在のタブに、位置情報に基づく現在地の詳細な1時間ごとの天気予報（降水確率付き）を追加 */}
             {activeTab === 'menu2' && (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px', backgroundColor: '#f0f9ff', padding: '15px', borderRadius: '8px' }}>
@@ -331,12 +350,31 @@ export default function App() {
                 {(() => {
                   const alert = getHeatstrokeAlert(dashboardData.weather.current.temp);
                   return (
-                    <div style={{ backgroundColor: alert.bg, padding: '10px', borderRadius: '8px', border: `1px solid ${alert.color}40` }}>
+                    <div style={{ backgroundColor: alert.bg, padding: '10px', borderRadius: '8px', border: `1px solid ${alert.color}40`, marginBottom: '15px' }}>
                       <div style={{ fontSize: '14px', color: alert.color, fontWeight: 'bold' }}>⚠️ 熱中症: {alert.text.split('（')[0]}</div>
                       <div style={{ fontSize: '12px', color: alert.color, marginTop: '4px' }}>（{alert.text.split('（')[1]}</div>
                     </div>
                   );
                 })()}
+
+                {dashboardData.weather.localHourly && (
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
+                      📍 現在地の詳細予報（12時間）
+                    </div>
+                    {/* 横スクロール可能な1時間ごとの天気リスト */}
+                    <div style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '8px', WebkitOverflowScrolling: 'touch' }}>
+                      {dashboardData.weather.localHourly.map((lh, idx) => (
+                        <div key={idx} style={{ minWidth: '50px', backgroundColor: '#f8fafc', padding: '8px 4px', borderRadius: '6px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>{lh.time}</div>
+                          <div style={{ fontSize: '20px', marginBottom: '4px' }}>{lh.info.icon}</div>
+                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f172a' }}>{lh.temp}℃</div>
+                          <div style={{ fontSize: '10px', color: '#3b82f6', marginTop: '2px' }}>{lh.pop}%</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
