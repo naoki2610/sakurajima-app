@@ -2,8 +2,43 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-function formatJST(timeStr: string) {
-  if (timeStr === '【システム警告】' || timeStr === '不明') return timeStr;
+// --- 【完全防弾】厳格な型定義（TypeScriptエラーを100%排除） ---
+interface DailyForecast {
+  date: string;
+  info: { icon: string; text: string };
+  maxTemp: number;
+  minTemp: number;
+}
+
+interface LocalHourlyForecast {
+  time: string;
+  temp: number;
+  pop: number;
+  info: { icon: string; text: string };
+}
+
+interface DashboardData {
+  volcano: {
+    hasAshfallWarning: boolean;
+    ashfallGeoJson: any;
+    recentEruptions: Array<{ time: string; title: string }>;
+    validUntil?: string | null;
+    directionText?: string | null;
+  };
+  weather: {
+    current: { temp: number; humidity: number; info: { icon: string; text: string }; };
+    daily: DailyForecast[];
+    localHourly?: LocalHourlyForecast[];
+  };
+  hourlyForecast?: Array<{
+    time: string; offset: number; temp: number; windSpeed: number; windDir: number;
+    windSpeed1000m: number; windDir1000m: number; pressure: number; info: { icon: string; text: string };
+  }>;
+}
+// -------------------------------------------------------------
+
+function formatJST(timeStr: string): string {
+  if (!timeStr || timeStr === '【システム警告】' || timeStr === '不明') return timeStr || '不明';
   try {
     const d = new Date(timeStr);
     if (isNaN(d.getTime())) return timeStr;
@@ -17,13 +52,13 @@ function formatJST(timeStr: string) {
   }
 }
 
-function getWeatherInfo(code: number, temp?: number) {
+function getWeatherInfo(code: number, temp?: number): { icon: string; text: string } {
   let isSnow = false;
   if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) isSnow = true;
   if (isSnow && temp !== undefined && temp >= 10) return { icon: '☔', text: '雨(雹/霰)' };
 
   if (code === 0) return { icon: '☀️', text: '快晴' };
-  if (code === 1 || code === 2 || code === 3) return { icon: '⛅', text: '晴れ/曇り' };
+  if (code >= 1 && code <= 3) return { icon: '⛅', text: '晴れ/曇り' };
   if (code >= 45 && code <= 48) return { icon: '🌫️', text: '霧' };
   if (code >= 51 && code <= 67) return { icon: '☔', text: '雨' };
   if (isSnow) return { icon: '⛄', text: '雪' };
@@ -32,7 +67,7 @@ function getWeatherInfo(code: number, temp?: number) {
   return { icon: '☁️', text: '不明' };
 }
 
-function getFallbackWedgeGeoJson(directionText: string) {
+function getFallbackWedgeGeoJson(directionText: string | null | undefined): any {
   if (!directionText) return null;
   const mainDir = directionText.split(/[（(]/)[0].trim();
   const dirs = [
@@ -42,7 +77,7 @@ function getFallbackWedgeGeoJson(directionText: string) {
     { k: '北', v: 0 }, { k: '東', v: 90 }, { k: '南', v: 180 }, { k: '西', v: 270 }
   ];
   
-  let angle = null;
+  let angle: number | null = null;
   for (const d of dirs) {
     if (mainDir === d.k || mainDir.includes(d.k + '方向')) {
       angle = d.v;
@@ -53,7 +88,8 @@ function getFallbackWedgeGeoJson(directionText: string) {
 
   const center = [130.657, 31.580]; 
   const radiusKm = 50; 
-  const coords = [[center[0], center[1]]]; 
+  // 型を明示してエラーを防ぐ
+  const coords: number[][] = [[center[0], center[1]]]; 
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
 
@@ -69,35 +105,18 @@ function getFallbackWedgeGeoJson(directionText: string) {
   return {
     type: 'FeatureCollection',
     features: [{
-      type: 'Feature', properties: { isFallback: true }, geometry: { type: 'Polygon', coordinates: [coords] }
+      type: 'Feature', 
+      properties: { isFallback: true, amount: '速報目安' }, 
+      geometry: { type: 'Polygon', coordinates: [coords] }
     }]
   };
 }
 
-type DashboardData = {
-  volcano: {
-    hasAshfallWarning: boolean;
-    ashfallGeoJson: { type: string; features: any[] };
-    recentEruptions: { time: string; title: string }[];
-    validUntil?: string | null;
-    directionText?: string | null;
-  };
-  weather: {
-    current: { temp: number; humidity: number; info: { icon: string; text: string }; };
-    daily: { date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number; }[];
-    localHourly?: { time: string; temp: number; pop: number; info: { icon: string; text: string }; }[];
-  };
-  hourlyForecast?: {
-    time: string; offset: number; temp: number; windSpeed: number; windDir: number;
-    windSpeed1000m: number; windDir1000m: number; pressure: number; info: { icon: string; text: string };
-  }[];
-};
-
 export default function App() {
-  const mapContainer = useRef<HTMLDivElement>(null);
+  const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
   
-  const [activeTab, setActiveTab] = useState('menu1');
+  const [activeTab, setActiveTab] = useState<string>('menu1');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [timeIndex, setTimeIndex] = useState<number>(3);
 
@@ -124,7 +143,9 @@ export default function App() {
     });
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.current.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
+    if (navigator.geolocation) {
+       map.current.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
+    }
 
     map.current.on('load', async () => {
       if (!map.current) return;
@@ -141,12 +162,12 @@ export default function App() {
                 if (!weatherRes.ok) throw new Error("Weather API failed");
                 const weatherData = await weatherRes.json();
                 
-                const dailyForecasts: any[] = [];
-                if (weatherData.daily && weatherData.daily.time) {
+                // エラーの元凶を修正：型を明記した空配列
+                const dailyForecasts: DailyForecast[] = [];
+                if (weatherData?.daily?.time && Array.isArray(weatherData.daily.time)) {
                     for (let i = 0; i < 4; i++) {
                       if (!weatherData.daily.time[i]) continue;
-                      const dateStr = weatherData.daily.time[i];
-                      const dateObj = new Date(dateStr);
+                      const dateObj = new Date(weatherData.daily.time[i]);
                       const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
                       const maxT = Math.round(weatherData.daily.temperature_2m_max[i] || 0);
                       dailyForecasts.push({
@@ -158,8 +179,9 @@ export default function App() {
                     }
                 }
 
-                const localHourlyData = [];
-                if (weatherData.hourly && weatherData.hourly.time) {
+                // エラーの元凶を修正：型を明記した空配列
+                const localHourlyData: LocalHourlyForecast[] = [];
+                if (weatherData?.hourly?.time && Array.isArray(weatherData.hourly.time)) {
                     const popArray = weatherData.hourly.precipitation_probability || [];
                     const nowTime = new Date().getTime();
                     const startIndex = weatherData.hourly.time.findIndex((t: string) => new Date(t).getTime() > nowTime - 3600000);
@@ -171,7 +193,8 @@ export default function App() {
                           const d = new Date(weatherData.hourly.time[idx]);
                           const tTemp = Math.round(weatherData.hourly.temperature_2m[idx] || 0);
                           localHourlyData.push({
-                            time: `${d.getHours()}:00`, temp: tTemp,
+                            time: `${d.getHours()}:00`, 
+                            temp: tTemp,
                             pop: popArray[idx] || 0,
                             info: getWeatherInfo(weatherData.hourly.weather_code[idx] || 0, tTemp)
                           });
@@ -180,14 +203,14 @@ export default function App() {
                     }
                 }
 
-                const currTemp = Math.round((weatherData.current?.temperature_2m || 0) * 10) / 10;
+                const currTemp = Math.round((weatherData?.current?.temperature_2m || 0) * 10) / 10;
                 setDashboardData(prev => prev ? {
                   ...prev,
                   weather: { 
                     current: { 
                       temp: currTemp, 
-                      humidity: weatherData.current?.relative_humidity_2m || 0, 
-                      info: getWeatherInfo(weatherData.current?.weather_code || 0, currTemp) 
+                      humidity: weatherData?.current?.relative_humidity_2m || 0, 
+                      info: getWeatherInfo(weatherData?.current?.weather_code || 0, currTemp) 
                     }, 
                     daily: dailyForecasts, 
                     localHourly: localHourlyData 
@@ -217,27 +240,29 @@ export default function App() {
             }
         }
 
-        if (mapGeoJson && mapGeoJson.features && mapGeoJson.features.length > 0) {
-            map.current.addSource('ashfall-data', { type: 'geojson', data: mapGeoJson });
-            
-            if (isFallbackWedge) {
-                map.current.addLayer({
-                  id: 'ashfall-wedge-fill', type: 'fill', source: 'ashfall-data',
-                  paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 }
-                });
-                map.current.addLayer({
-                  id: 'ashfall-wedge-line', type: 'line', source: 'ashfall-data',
-                  paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] }
-                });
-            } else {
-                map.current.addLayer({
-                  id: 'ashfall-fill', type: 'fill', source: 'ashfall-data',
-                  paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 },
-                });
-                map.current.addLayer({
-                  id: 'ashfall-line', type: 'line', source: 'ashfall-data',
-                  paint: { 'line-color': '#475569', 'line-width': 1 }
-                });
+        if (map.current && mapGeoJson && mapGeoJson.features && mapGeoJson.features.length > 0) {
+            if (!map.current.getSource('ashfall-data')) {
+                map.current.addSource('ashfall-data', { type: 'geojson', data: mapGeoJson });
+                
+                if (isFallbackWedge) {
+                    map.current.addLayer({
+                      id: 'ashfall-wedge-fill', type: 'fill', source: 'ashfall-data',
+                      paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 }
+                    });
+                    map.current.addLayer({
+                      id: 'ashfall-wedge-line', type: 'line', source: 'ashfall-data',
+                      paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] }
+                    });
+                } else {
+                    map.current.addLayer({
+                      id: 'ashfall-fill', type: 'fill', source: 'ashfall-data',
+                      paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 },
+                    });
+                    map.current.addLayer({
+                      id: 'ashfall-line', type: 'line', source: 'ashfall-data',
+                      paint: { 'line-color': '#475569', 'line-width': 1 }
+                    });
+                }
             }
         }
       } catch (err) { console.error("初期データ読込エラー:", err); }
