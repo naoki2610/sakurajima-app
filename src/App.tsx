@@ -2,41 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// --- 【完全防弾】厳格な型定義（TypeScriptエラーを100%排除） ---
-interface DailyForecast {
-  date: string;
-  info: { icon: string; text: string };
-  maxTemp: number;
-  minTemp: number;
-}
-
-interface LocalHourlyForecast {
-  time: string;
-  temp: number;
-  pop: number;
-  info: { icon: string; text: string };
-}
-
-interface DashboardData {
-  volcano: {
-    hasAshfallWarning: boolean;
-    ashfallGeoJson: any;
-    recentEruptions: Array<{ time: string; title: string }>;
-    validUntil?: string | null;
-    directionText?: string | null;
-  };
-  weather: {
-    current: { temp: number; humidity: number; info: { icon: string; text: string }; };
-    daily: DailyForecast[];
-    localHourly?: LocalHourlyForecast[];
-  };
-  hourlyForecast?: Array<{
-    time: string; offset: number; temp: number; windSpeed: number; windDir: number;
-    windSpeed1000m: number; windDir1000m: number; pressure: number; info: { icon: string; text: string };
-  }>;
-}
-// -------------------------------------------------------------
-
 function formatJST(timeStr: string): string {
   if (!timeStr || timeStr === '【システム警告】' || timeStr === '不明') return timeStr || '不明';
   try {
@@ -67,34 +32,34 @@ function getWeatherInfo(code: number, temp?: number): { icon: string; text: stri
   return { icon: '☁️', text: '不明' };
 }
 
+// 【100%修正】描画ルールの正常化と、強固な方角抽出アルゴリズム
 function getFallbackWedgeGeoJson(directionText: string | null | undefined): any {
   if (!directionText) return null;
-  const mainDir = directionText.split(/[（(]/)[0].trim();
-  const dirs = [
-    { k: '北北東', v: 22.5 }, { k: '東北東', v: 67.5 }, { k: '東南東', v: 112.5 }, { k: '南南東', v: 157.5 },
-    { k: '南南西', v: 202.5 }, { k: '西南西', v: 247.5 }, { k: '西北西', v: 292.5 }, { k: '北北西', v: 337.5 },
-    { k: '北東', v: 45 }, { k: '南東', v: 135 }, { k: '南西', v: 225 }, { k: '北西', v: 315 },
-    { k: '北', v: 0 }, { k: '東', v: 90 }, { k: '南', v: 180 }, { k: '西', v: 270 }
-  ];
   
-  let angle: number | null = null;
-  for (const d of dirs) {
-    if (mainDir === d.k || mainDir.includes(d.k + '方向')) {
-      angle = d.v;
-      break;
-    }
-  }
-  if (angle === null) return null;
+  // 括弧や地名に騙されず、気象庁が使う「16方位」の単語だけを強制的に抽出する
+  const match = directionText.match(/(北北東|東北東|東南東|南南東|南南西|西南西|西北西|北北西|北東|南東|南西|北西|北|東|南|西)/);
+  if (!match) return null;
+  
+  const mainDir = match[1];
+  const dirs: Record<string, number> = {
+    '北北東': 22.5, '東北東': 67.5, '東南東': 112.5, '南南東': 157.5,
+    '南南西': 202.5, '西南西': 247.5, '西北西': 292.5, '北北西': 337.5,
+    '北東': 45, '南東': 135, '南西': 225, '北西': 315,
+    '北': 0, '東': 90, '南': 180, '西': 270
+  };
+  
+  const angle = dirs[mainDir];
+  if (angle === undefined) return null;
 
   const center = [130.657, 31.580]; 
   const radiusKm = 50; 
-  // 型を明示してエラーを防ぐ
   const coords: number[][] = [[center[0], center[1]]]; 
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
 
-  const spread = 25; 
-  for (let i = angle - spread; i <= angle + spread; i += 5) {
+  // 【最重要修正】GeoJSONの右手の法則（反時計回り）に従って座標配列を作る
+  // angle + 25 から angle - 25 へ減少させることで、反時計回りの正しいポリゴンになる
+  for (let i = angle + 25; i >= angle - 25; i -= 5) {
     const rad = i * Math.PI / 180;
     const dLat = radiusKm * Math.cos(rad) * latPerKm;
     const dLon = radiusKm * Math.sin(rad) * lonPerKm;
@@ -111,6 +76,25 @@ function getFallbackWedgeGeoJson(directionText: string | null | undefined): any 
     }]
   };
 }
+
+type DashboardData = {
+  volcano: {
+    hasAshfallWarning: boolean;
+    ashfallGeoJson: any;
+    recentEruptions: { time: string; title: string }[];
+    validUntil?: string | null;
+    directionText?: string | null;
+  };
+  weather: {
+    current: { temp: number; humidity: number; info: { icon: string; text: string }; };
+    daily: Array<{ date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number; }>;
+    localHourly?: Array<{ time: string; temp: number; pop: number; info: { icon: string; text: string }; }>;
+  };
+  hourlyForecast?: Array<{
+    time: string; offset: number; temp: number; windSpeed: number; windDir: number;
+    windSpeed1000m: number; windDir1000m: number; pressure: number; info: { icon: string; text: string };
+  }>;
+};
 
 export default function App() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
@@ -162,8 +146,7 @@ export default function App() {
                 if (!weatherRes.ok) throw new Error("Weather API failed");
                 const weatherData = await weatherRes.json();
                 
-                // エラーの元凶を修正：型を明記した空配列
-                const dailyForecasts: DailyForecast[] = [];
+                const dailyForecasts: Array<{ date: string; info: { icon: string; text: string; }; maxTemp: number; minTemp: number; }> = [];
                 if (weatherData?.daily?.time && Array.isArray(weatherData.daily.time)) {
                     for (let i = 0; i < 4; i++) {
                       if (!weatherData.daily.time[i]) continue;
@@ -179,8 +162,7 @@ export default function App() {
                     }
                 }
 
-                // エラーの元凶を修正：型を明記した空配列
-                const localHourlyData: LocalHourlyForecast[] = [];
+                const localHourlyData: Array<{ time: string; temp: number; pop: number; info: { icon: string; text: string; }; }> = [];
                 if (weatherData?.hourly?.time && Array.isArray(weatherData.hourly.time)) {
                     const popArray = weatherData.hourly.precipitation_probability || [];
                     const nowTime = new Date().getTime();
