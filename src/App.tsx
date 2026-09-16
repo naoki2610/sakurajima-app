@@ -27,17 +27,53 @@ function getWeatherInfo(code: number) {
   return { icon: '☁️', text: '不明' };
 }
 
+// 【究極のUI改修】文字情報（「北方向」など）から、地図上に描画するための扇形ポリゴンを動的生成する関数
+function getFallbackWedgeGeoJson(directionText: string) {
+  // 長い文字列（詳細な方角）から順にマッチングさせる
+  const dirs = [
+    { k: '北北東', v: 22.5 }, { k: '東北東', v: 67.5 }, { k: '東南東', v: 112.5 }, { k: '南南東', v: 157.5 },
+    { k: '南南西', v: 202.5 }, { k: '西南西', v: 247.5 }, { k: '西北西', v: 292.5 }, { k: '北北西', v: 337.5 },
+    { k: '北東', v: 45 }, { k: '南東', v: 135 }, { k: '南西', v: 225 }, { k: '北西', v: 315 },
+    { k: '北', v: 0 }, { k: '東', v: 90 }, { k: '南', v: 180 }, { k: '西', v: 270 }
+  ];
+  
+  let angle = null;
+  for (const d of dirs) {
+    if (directionText.includes(d.k)) { angle = d.v; break; }
+  }
+  if (angle === null) return null;
+
+  const center = [130.657, 31.580]; // 桜島の座標
+  const radiusKm = 50; // 警戒エリアの半径（約50km）
+  const coords = [center];
+  
+  // kmを緯度経度の度数に概算変換
+  const latPerKm = 1 / 111.32;
+  const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
+
+  const spread = 25; // 扇形の広がり角（±25度）
+  for (let i = angle - spread; i <= angle + spread; i += 5) {
+    const rad = i * Math.PI / 180;
+    const dLat = radiusKm * Math.cos(rad) * latPerKm;
+    const dLon = radiusKm * Math.sin(rad) * lonPerKm;
+    coords.push([center[0] + dLon, center[1] + dLat]);
+  }
+  coords.push(center); // ポリゴンを閉じる
+
+  return {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: { isFallback: true },
+      geometry: { type: 'Polygon', coordinates: [coords] }
+    }]
+  };
+}
+
 type DashboardData = {
   volcano: {
     hasAshfallWarning: boolean;
-    ashfallGeoJson: {
-      type: string;
-      features: {
-        type: string;
-        properties: { volcano: string; amount: string };
-        geometry: { type: string; coordinates: number[][][] };
-      }[];
-    };
+    ashfallGeoJson: { type: string; features: any[] };
     recentEruptions: { time: string; title: string }[];
     validUntil?: string | null;
     directionText?: string | null;
@@ -79,7 +115,7 @@ export default function App() {
         layers: [{ id: 'osm-layer', type: 'raster', source: 'osm', minzoom: 0, maxzoom: 19 }],
       },
       center: [130.657, 31.580],
-      zoom: 10,
+      zoom: 9.5,
     });
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -104,14 +140,12 @@ export default function App() {
               const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
               const weatherData = await weatherRes.json();
               
-              const dailyForecasts: { date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number }[] = [];
-              
+              const dailyForecasts: any[] = [];
               for (let i = 0; i < 4; i++) {
                 const dateStr = weatherData.daily.time[i];
                 const dateObj = new Date(dateStr);
                 const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
                 const formattedDate = `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`;
-                
                 dailyForecasts.push({
                   date: formattedDate, info: getWeatherInfo(weatherData.daily.weather_code[i]),
                   maxTemp: Math.round(weatherData.daily.temperature_2m_max[i]), minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
@@ -138,17 +172,32 @@ export default function App() {
           });
         }
 
-        if (data.volcano && data.volcano.ashfallGeoJson) {
-            map.current.addSource('ashfall-data', {
-              type: 'geojson', data: data.volcano.ashfallGeoJson,
-            });
+        // 【地図描画ロジックの改修】
+        let mapGeoJson = data.volcano.ashfallGeoJson;
+        let isFallbackWedge = false;
+        
+        // 気象庁の正式ポリゴンが無く、かつ方向テキストがある場合（速報段階）に扇形を生成
+        if ((!mapGeoJson || mapGeoJson.features.length === 0) && data.volcano.directionText) {
+            const wedgeGeoJson = getFallbackWedgeGeoJson(data.volcano.directionText);
+            if (wedgeGeoJson) {
+                mapGeoJson = wedgeGeoJson;
+                isFallbackWedge = true;
+            }
+        }
+
+        if (mapGeoJson && mapGeoJson.features.length > 0) {
+            map.current.addSource('ashfall-data', { type: 'geojson', data: mapGeoJson });
             map.current.addLayer({
               id: 'ashfall-fill', type: 'fill', source: 'ashfall-data',
-              paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 },
+              paint: { 
+                // フォールバックの扇形は目立つ赤色の半透明。正式データは降灰量に応じた色分け。
+                'fill-color': isFallbackWedge ? '#dc2626' : ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 
+                'fill-opacity': isFallbackWedge ? 0.25 : 0.55 
+              },
             });
             map.current.addLayer({
               id: 'ashfall-line', type: 'line', source: 'ashfall-data',
-              paint: { 'line-color': '#475569', 'line-width': 2 },
+              paint: { 'line-color': isFallbackWedge ? '#991b1b' : '#475569', 'line-width': isFallbackWedge ? 2 : 1, 'line-dasharray': isFallbackWedge ? [4, 4] : [1] },
             });
         }
       } catch (err) {
@@ -226,14 +275,13 @@ export default function App() {
             
             {activeTab === 'menu1' && (
               <div>
-                {/* 【究極の改修】降灰方向テキストを極めて目立つ緊急バナーとして最上部に強制表示 */}
                 {dashboardData.volcano.directionText && (
                   <div style={{ marginBottom: '12px', backgroundColor: '#fef2f2', padding: '12px', borderRadius: '8px', border: '2px solid #dc2626', boxShadow: '0 2px 4px rgba(220, 38, 38, 0.2)' }}>
                     <div style={{ fontWeight: 'bold', color: '#b91c1c', fontSize: '15px', marginBottom: '4px' }}>
                       ⚠️ 降灰警戒方向: {dashboardData.volcano.directionText}
                     </div>
                     <div style={{ fontSize: '11px', color: '#991b1b', lineHeight: '1.4' }}>
-                       ※地図にエリアが表示されていない速報段階でも、上記方向では屋外作業、UAVフライト、洗濯・洗車などの生活判断に十分警戒してください。
+                       ※地図上の半透明の扇形は目安です。この方向では屋外作業、UAVフライト、洗濯・洗車などの生活判断に十分警戒してください。
                     </div>
                   </div>
                 )}
@@ -260,11 +308,12 @@ export default function App() {
                 </div>
                 
                 <div style={{ fontSize: '14px', color: '#334155' }}>
-                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 現在の降灰予測エリア</p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#e11d48', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '12px' }}>多量</span></div>
-                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#f97316', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '12px' }}>やや多量</span></div>
-                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#eab308', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '12px' }}>少量</span></div>
+                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 降灰予測エリア</p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#e11d48', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '11px' }}>多量</span></div>
+                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#f97316', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '11px' }}>やや多量</span></div>
+                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#eab308', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '11px' }}>少量</span></div>
+                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#dc2626', opacity: 0.25, marginRight: '4px', border: '1px dashed #991b1b' }}></span><span style={{ fontSize: '11px' }}>速報目安</span></div>
                   </div>
                 </div>
               </div>
