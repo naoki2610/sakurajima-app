@@ -33,6 +33,7 @@ function getWeatherInfo(code: number, temp?: number) {
 }
 
 function getFallbackWedgeGeoJson(directionText: string) {
+  if (!directionText) return null;
   const mainDir = directionText.split(/[（(]/)[0].trim();
   const dirs = [
     { k: '北北東', v: 22.5 }, { k: '東北東', v: 67.5 }, { k: '東南東', v: 112.5 }, { k: '南南東', v: 157.5 },
@@ -52,8 +53,6 @@ function getFallbackWedgeGeoJson(directionText: string) {
 
   const center = [130.657, 31.580]; 
   const radiusKm = 50; 
-  
-  // 【100%修正3】MapLibreの描画クラッシュを防ぐため、配列参照を完全に独立させる
   const coords = [[center[0], center[1]]]; 
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
@@ -65,7 +64,7 @@ function getFallbackWedgeGeoJson(directionText: string) {
     const dLon = radiusKm * Math.sin(rad) * lonPerKm;
     coords.push([center[0] + dLon, center[1] + dLat]);
   }
-  coords.push([center[0], center[1]]); // 独立した参照で閉じる
+  coords.push([center[0], center[1]]);
 
   return {
     type: 'FeatureCollection',
@@ -139,48 +138,62 @@ export default function App() {
         const fetchAndMergeWeather = async (lat: number, lon: number) => {
             try {
                 const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
+                if (!weatherRes.ok) throw new Error("Weather API failed");
                 const weatherData = await weatherRes.json();
                 
                 const dailyForecasts: any[] = [];
-                for (let i = 0; i < 4; i++) {
-                  const dateStr = weatherData.daily.time[i];
-                  const dateObj = new Date(dateStr);
-                  const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
-                  const maxT = Math.round(weatherData.daily.temperature_2m_max[i]);
-                  dailyForecasts.push({
-                    date: `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`,
-                    info: getWeatherInfo(weatherData.daily.weather_code[i], maxT),
-                    maxTemp: maxT, minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
-                  });
+                if (weatherData.daily && weatherData.daily.time) {
+                    for (let i = 0; i < 4; i++) {
+                      if (!weatherData.daily.time[i]) continue;
+                      const dateStr = weatherData.daily.time[i];
+                      const dateObj = new Date(dateStr);
+                      const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+                      const maxT = Math.round(weatherData.daily.temperature_2m_max[i] || 0);
+                      dailyForecasts.push({
+                        date: `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`,
+                        info: getWeatherInfo(weatherData.daily.weather_code[i] || 0, maxT),
+                        maxTemp: maxT, 
+                        minTemp: Math.round(weatherData.daily.temperature_2m_min[i] || 0)
+                      });
+                    }
                 }
 
                 const localHourlyData = [];
-                // 【100%修正4】API仕様の欠落に対応。降水確率配列が無い場合のエラー（画面真っ白）を回避
-                const popArray = weatherData.hourly.precipitation_probability || [];
-                const nowTime = new Date().getTime();
-                const startIndex = weatherData.hourly.time.findIndex((t: string) => new Date(t).getTime() > nowTime - 3600000);
-                
-                if (startIndex !== -1) {
-                  for (let i = 0; i < 12; i++) {
-                    const idx = startIndex + i;
-                    if (idx < weatherData.hourly.time.length) {
-                      const d = new Date(weatherData.hourly.time[idx]);
-                      const tTemp = Math.round(weatherData.hourly.temperature_2m[idx]);
-                      localHourlyData.push({
-                        time: `${d.getHours()}:00`, temp: tTemp,
-                        pop: popArray[idx] || 0,
-                        info: getWeatherInfo(weatherData.hourly.weather_code[idx], tTemp)
-                      });
+                if (weatherData.hourly && weatherData.hourly.time) {
+                    const popArray = weatherData.hourly.precipitation_probability || [];
+                    const nowTime = new Date().getTime();
+                    const startIndex = weatherData.hourly.time.findIndex((t: string) => new Date(t).getTime() > nowTime - 3600000);
+                    
+                    if (startIndex !== -1) {
+                      for (let i = 0; i < 12; i++) {
+                        const idx = startIndex + i;
+                        if (idx < weatherData.hourly.time.length) {
+                          const d = new Date(weatherData.hourly.time[idx]);
+                          const tTemp = Math.round(weatherData.hourly.temperature_2m[idx] || 0);
+                          localHourlyData.push({
+                            time: `${d.getHours()}:00`, temp: tTemp,
+                            pop: popArray[idx] || 0,
+                            info: getWeatherInfo(weatherData.hourly.weather_code[idx] || 0, tTemp)
+                          });
+                        }
+                      }
                     }
-                  }
                 }
 
-                const currTemp = Math.round(weatherData.current.temperature_2m * 10) / 10;
+                const currTemp = Math.round((weatherData.current?.temperature_2m || 0) * 10) / 10;
                 setDashboardData(prev => prev ? {
                   ...prev,
-                  weather: { current: { temp: currTemp, humidity: weatherData.current.relative_humidity_2m, info: getWeatherInfo(weatherData.current.weather_code, currTemp) }, daily: dailyForecasts, localHourly: localHourlyData }
+                  weather: { 
+                    current: { 
+                      temp: currTemp, 
+                      humidity: weatherData.current?.relative_humidity_2m || 0, 
+                      info: getWeatherInfo(weatherData.current?.weather_code || 0, currTemp) 
+                    }, 
+                    daily: dailyForecasts, 
+                    localHourly: localHourlyData 
+                  }
                 } : null);
-            } catch (e) { console.error("天気APIの取得エラー:", e); }
+            } catch (e) { console.error("天気API取得エラー:", e); }
         };
 
         if (navigator.geolocation) {
@@ -193,10 +206,10 @@ export default function App() {
           fetchAndMergeWeather(31.628, 130.396);
         }
 
-        let mapGeoJson = data.volcano.ashfallGeoJson;
+        let mapGeoJson: any = data?.volcano?.ashfallGeoJson;
         let isFallbackWedge = false;
         
-        if ((!mapGeoJson || mapGeoJson.features.length === 0) && data.volcano.directionText) {
+        if ((!mapGeoJson || !mapGeoJson.features || mapGeoJson.features.length === 0) && data?.volcano?.directionText) {
             const wedgeGeoJson = getFallbackWedgeGeoJson(data.volcano.directionText);
             if (wedgeGeoJson) {
                 mapGeoJson = wedgeGeoJson;
@@ -204,7 +217,7 @@ export default function App() {
             }
         }
 
-        if (mapGeoJson && mapGeoJson.features.length > 0) {
+        if (mapGeoJson && mapGeoJson.features && mapGeoJson.features.length > 0) {
             map.current.addSource('ashfall-data', { type: 'geojson', data: mapGeoJson });
             
             if (isFallbackWedge) {
@@ -227,7 +240,7 @@ export default function App() {
                 });
             }
         }
-      } catch (err) { }
+      } catch (err) { console.error("初期データ読込エラー:", err); }
     });
 
     return () => {
@@ -246,8 +259,8 @@ export default function App() {
   };
 
   const getHeatstrokeAlert = (temp: number) => {
-    if (temp >= 35) return { text: '危険（運動は原則中止）', color: '#9f1239', bg: '#ffe4e6' };
-    if (temp >= 31) return { text: '厳重警戒（激しい運動は中止）', color: '#be123c', bg: '#fff1f2' };
+    if (temp >= 35) return { text: '危険（運動中止）', color: '#9f1239', bg: '#ffe4e6' };
+    if (temp >= 31) return { text: '厳重警戒（激しい運動中止）', color: '#be123c', bg: '#fff1f2' };
     if (temp >= 28) return { text: '警戒（積極的に休息を）', color: '#c2410c', bg: '#fff7ed' };
     if (temp >= 25) return { text: '注意（こまめな水分補給）', color: '#b45309', bg: '#fef3c7' };
     return { text: 'ほぼ安全', color: '#0f766e', bg: '#f0fdf4' };
@@ -258,8 +271,8 @@ export default function App() {
   }));
 
   const hourlyData = dashboardData?.hourlyForecast || fallbackHourly;
-  const currentSlideData = hourlyData[timeIndex];
-  const prevPressure = timeIndex > 0 ? hourlyData[timeIndex - 1].pressure : currentSlideData.pressure;
+  const currentSlideData = hourlyData[timeIndex] || fallbackHourly[3];
+  const prevPressure = timeIndex > 0 ? (hourlyData[timeIndex - 1]?.pressure || currentSlideData.pressure) : currentSlideData.pressure;
   const pressureDiff = currentSlideData.pressure - prevPressure;
   let trendMsg = { text: "気圧安定", color: '#10b981' };
   if (pressureDiff <= -1.0) trendMsg = { text: "気圧低下中（突風注意）", color: '#ef4444' };
