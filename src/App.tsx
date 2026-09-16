@@ -20,10 +20,7 @@ function formatJST(timeStr: string) {
 function getWeatherInfo(code: number, temp?: number) {
   let isSnow = false;
   if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) isSnow = true;
-  
-  if (isSnow && temp !== undefined && temp >= 10) {
-     return { icon: '☔', text: '雨(雹/霰)' };
-  }
+  if (isSnow && temp !== undefined && temp >= 10) return { icon: '☔', text: '雨(雹/霰)' };
 
   if (code === 0) return { icon: '☀️', text: '快晴' };
   if (code === 1 || code === 2 || code === 3) return { icon: '⛅', text: '晴れ/曇り' };
@@ -35,11 +32,8 @@ function getWeatherInfo(code: number, temp?: number) {
   return { icon: '☁️', text: '不明' };
 }
 
-// 【真の100%修正】抽出した mainDir を使って厳格に方角を判定する
 function getFallbackWedgeGeoJson(directionText: string) {
-  // 括弧より前の「主方向」だけを抽出・空白除去（例: "東（鹿屋市輝北方向）" -> "東"）
   const mainDir = directionText.split(/[（(]/)[0].trim();
-  
   const dirs = [
     { k: '北北東', v: 22.5 }, { k: '東北東', v: 67.5 }, { k: '東南東', v: 112.5 }, { k: '南南東', v: 157.5 },
     { k: '南南西', v: 202.5 }, { k: '西南西', v: 247.5 }, { k: '西北西', v: 292.5 }, { k: '北北西', v: 337.5 },
@@ -49,18 +43,18 @@ function getFallbackWedgeGeoJson(directionText: string) {
   
   let angle = null;
   for (const d of dirs) {
-    // 古い directionText ではなく、純粋な方角のみの mainDir を比較する！
     if (mainDir === d.k || mainDir.includes(d.k + '方向')) {
       angle = d.v;
       break;
     }
   }
-  
   if (angle === null) return null;
 
   const center = [130.657, 31.580]; 
   const radiusKm = 50; 
-  const coords = [center];
+  
+  // 【100%修正3】MapLibreの描画クラッシュを防ぐため、配列参照を完全に独立させる
+  const coords = [[center[0], center[1]]]; 
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
 
@@ -71,14 +65,12 @@ function getFallbackWedgeGeoJson(directionText: string) {
     const dLon = radiusKm * Math.sin(rad) * lonPerKm;
     coords.push([center[0] + dLon, center[1] + dLat]);
   }
-  coords.push(center); 
+  coords.push([center[0], center[1]]); // 独立した参照で閉じる
 
   return {
     type: 'FeatureCollection',
     features: [{
-      type: 'Feature',
-      properties: { isFallback: true },
-      geometry: { type: 'Polygon', coordinates: [coords] }
+      type: 'Feature', properties: { isFallback: true }, geometry: { type: 'Polygon', coordinates: [coords] }
     }]
   };
 }
@@ -133,10 +125,7 @@ export default function App() {
     });
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.current.addControl(new maplibregl.GeolocateControl({
-      positionOptions: { enableHighAccuracy: true },
-      trackUserLocation: true
-    }), 'top-right');
+    map.current.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
 
     map.current.on('load', async () => {
       if (!map.current) return;
@@ -157,21 +146,20 @@ export default function App() {
                   const dateStr = weatherData.daily.time[i];
                   const dateObj = new Date(dateStr);
                   const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
-                  
                   const maxT = Math.round(weatherData.daily.temperature_2m_max[i]);
-                  const weatherInfo = getWeatherInfo(weatherData.daily.weather_code[i], maxT);
-
                   dailyForecasts.push({
                     date: `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`,
-                    info: weatherInfo,
-                    maxTemp: maxT, 
-                    minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
+                    info: getWeatherInfo(weatherData.daily.weather_code[i], maxT),
+                    maxTemp: maxT, minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
                   });
                 }
 
+                const localHourlyData = [];
+                // 【100%修正4】API仕様の欠落に対応。降水確率配列が無い場合のエラー（画面真っ白）を回避
+                const popArray = weatherData.hourly.precipitation_probability || [];
                 const nowTime = new Date().getTime();
                 const startIndex = weatherData.hourly.time.findIndex((t: string) => new Date(t).getTime() > nowTime - 3600000);
-                const localHourlyData = [];
+                
                 if (startIndex !== -1) {
                   for (let i = 0; i < 12; i++) {
                     const idx = startIndex + i;
@@ -179,9 +167,8 @@ export default function App() {
                       const d = new Date(weatherData.hourly.time[idx]);
                       const tTemp = Math.round(weatherData.hourly.temperature_2m[idx]);
                       localHourlyData.push({
-                        time: `${d.getHours()}:00`,
-                        temp: tTemp,
-                        pop: weatherData.hourly.precipitation_probability[idx] || 0,
+                        time: `${d.getHours()}:00`, temp: tTemp,
+                        pop: popArray[idx] || 0,
                         info: getWeatherInfo(weatherData.hourly.weather_code[idx], tTemp)
                       });
                     }
@@ -191,26 +178,15 @@ export default function App() {
                 const currTemp = Math.round(weatherData.current.temperature_2m * 10) / 10;
                 setDashboardData(prev => prev ? {
                   ...prev,
-                  weather: {
-                    current: {
-                      temp: currTemp,
-                      humidity: weatherData.current.relative_humidity_2m,
-                      info: getWeatherInfo(weatherData.current.weather_code, currTemp)
-                    },
-                    daily: dailyForecasts,
-                    localHourly: localHourlyData
-                  }
+                  weather: { current: { temp: currTemp, humidity: weatherData.current.relative_humidity_2m, info: getWeatherInfo(weatherData.current.weather_code, currTemp) }, daily: dailyForecasts, localHourly: localHourlyData }
                 } : null);
-            } catch (e) {
-                console.error("天気APIの取得エラー:", e);
-            }
+            } catch (e) { console.error("天気APIの取得エラー:", e); }
         };
 
-        // GPSフォールバック機能（日置市中心部へフォールバック）
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
             (position) => { fetchAndMergeWeather(position.coords.latitude, position.coords.longitude); }, 
-            (error) => { fetchAndMergeWeather(31.628, 130.396); },
+            () => { fetchAndMergeWeather(31.628, 130.396); },
             { timeout: 5000 }
           );
         } else {
@@ -251,9 +227,7 @@ export default function App() {
                 });
             }
         }
-      } catch (err) {
-        console.error("初期データの読み込みに失敗しました:", err);
-      }
+      } catch (err) { }
     });
 
     return () => {
