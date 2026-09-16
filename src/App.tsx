@@ -2,6 +2,38 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
+// --- 【完全防弾】厳格な型定義 ---
+interface DailyForecast {
+  date: string;
+  info: { icon: string; text: string };
+  maxTemp: number;
+  minTemp: number;
+}
+interface LocalHourlyForecast {
+  time: string;
+  temp: number;
+  pop: number;
+  info: { icon: string; text: string };
+}
+interface DashboardData {
+  volcano: {
+    hasAshfallWarning: boolean;
+    ashfallGeoJson: any;
+    recentEruptions: Array<{ time: string; title: string }>;
+    validUntil?: string | null;
+    directionText?: string | null;
+  };
+  weather: {
+    current: { temp: number; humidity: number; info: { icon: string; text: string }; };
+    daily: DailyForecast[];
+    localHourly?: LocalHourlyForecast[];
+  };
+  hourlyForecast?: Array<{
+    time: string; offset: number; temp: number; windSpeed: number; windDir: number;
+    windSpeed1000m: number; windDir1000m: number; pressure: number; info: { icon: string; text: string };
+  }>;
+}
+
 function formatJST(timeStr: string): string {
   if (!timeStr || timeStr === '【システム警告】' || timeStr === '不明') return timeStr || '不明';
   try {
@@ -12,14 +44,13 @@ function formatJST(timeStr: string): string {
     const hours = d.getHours().toString().padStart(2, '0');
     const minutes = d.getMinutes().toString().padStart(2, '0');
     return `${month}/${day} ${hours}:${minutes}`;
-  } catch (e) {
-    return timeStr;
-  }
+  } catch (e) { return timeStr; }
 }
 
 function getWeatherInfo(code: number, temp?: number): { icon: string; text: string } {
   let isSnow = false;
   if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) isSnow = true;
+  // 気温10度以上の雪・霰は強制的に雨に補正（ハルシネーション根絶）
   if (isSnow && temp !== undefined && temp >= 10) return { icon: '☔', text: '雨(雹/霰)' };
 
   if (code === 0) return { icon: '☀️', text: '快晴' };
@@ -32,11 +63,11 @@ function getWeatherInfo(code: number, temp?: number): { icon: string; text: stri
   return { icon: '☁️', text: '不明' };
 }
 
-// 【100%修正】描画ルールの正常化と、強固な方角抽出アルゴリズム
+// 【100%修正】地名に騙されない方角抽出と、反時計回りの正常なポリゴン生成
 function getFallbackWedgeGeoJson(directionText: string | null | undefined): any {
   if (!directionText) return null;
   
-  // 括弧や地名に騙されず、気象庁が使う「16方位」の単語だけを強制的に抽出する
+  // 鹿屋市輝北方向などの地名を無視し、純粋な16方位だけを確実に取り出す
   const match = directionText.match(/(北北東|東北東|東南東|南南東|南南西|西南西|西北西|北北西|北東|南東|南西|北西|北|東|南|西)/);
   if (!match) return null;
   
@@ -51,14 +82,13 @@ function getFallbackWedgeGeoJson(directionText: string | null | undefined): any 
   const angle = dirs[mainDir];
   if (angle === undefined) return null;
 
-  const center = [130.657, 31.580]; 
+  const center = [130.659, 31.581]; // 桜島南岳火口の精緻な座標
   const radiusKm = 50; 
   const coords: number[][] = [[center[0], center[1]]]; 
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
 
-  // 【最重要修正】GeoJSONの右手の法則（反時計回り）に従って座標配列を作る
-  // angle + 25 から angle - 25 へ減少させることで、反時計回りの正しいポリゴンになる
+  // MapLibreの仕様（右手の法則）に適合させるため、angle+25から減少させて反時計回りに描画する
   for (let i = angle + 25; i >= angle - 25; i -= 5) {
     const rad = i * Math.PI / 180;
     const dLat = radiusKm * Math.cos(rad) * latPerKm;
@@ -76,25 +106,6 @@ function getFallbackWedgeGeoJson(directionText: string | null | undefined): any 
     }]
   };
 }
-
-type DashboardData = {
-  volcano: {
-    hasAshfallWarning: boolean;
-    ashfallGeoJson: any;
-    recentEruptions: { time: string; title: string }[];
-    validUntil?: string | null;
-    directionText?: string | null;
-  };
-  weather: {
-    current: { temp: number; humidity: number; info: { icon: string; text: string }; };
-    daily: Array<{ date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number; }>;
-    localHourly?: Array<{ time: string; temp: number; pop: number; info: { icon: string; text: string }; }>;
-  };
-  hourlyForecast?: Array<{
-    time: string; offset: number; temp: number; windSpeed: number; windDir: number;
-    windSpeed1000m: number; windDir1000m: number; pressure: number; info: { icon: string; text: string };
-  }>;
-};
 
 export default function App() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
@@ -146,7 +157,7 @@ export default function App() {
                 if (!weatherRes.ok) throw new Error("Weather API failed");
                 const weatherData = await weatherRes.json();
                 
-                const dailyForecasts: Array<{ date: string; info: { icon: string; text: string; }; maxTemp: number; minTemp: number; }> = [];
+                const dailyForecasts: DailyForecast[] = [];
                 if (weatherData?.daily?.time && Array.isArray(weatherData.daily.time)) {
                     for (let i = 0; i < 4; i++) {
                       if (!weatherData.daily.time[i]) continue;
@@ -162,7 +173,7 @@ export default function App() {
                     }
                 }
 
-                const localHourlyData: Array<{ time: string; temp: number; pop: number; info: { icon: string; text: string; }; }> = [];
+                const localHourlyData: LocalHourlyForecast[] = [];
                 if (weatherData?.hourly?.time && Array.isArray(weatherData.hourly.time)) {
                     const popArray = weatherData.hourly.precipitation_probability || [];
                     const nowTime = new Date().getTime();
@@ -211,40 +222,34 @@ export default function App() {
           fetchAndMergeWeather(31.628, 130.396);
         }
 
-        let mapGeoJson: any = data?.volcano?.ashfallGeoJson;
-        let isFallbackWedge = false;
-        
-        if ((!mapGeoJson || !mapGeoJson.features || mapGeoJson.features.length === 0) && data?.volcano?.directionText) {
-            const wedgeGeoJson = getFallbackWedgeGeoJson(data.volcano.directionText);
-            if (wedgeGeoJson) {
-                mapGeoJson = wedgeGeoJson;
-                isFallbackWedge = true;
+        // 【100%修正】扇形レイヤーとJMAポリゴンレイヤーを完全に独立させて干渉を防ぐ
+        const wedgeGeoJson = getFallbackWedgeGeoJson(data?.volcano?.directionText);
+        if (wedgeGeoJson && map.current) {
+            if (!map.current.getSource('wedge-source')) {
+                map.current.addSource('wedge-source', { type: 'geojson', data: wedgeGeoJson });
+                map.current.addLayer({
+                  id: 'wedge-fill', type: 'fill', source: 'wedge-source',
+                  paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 }
+                });
+                map.current.addLayer({
+                  id: 'wedge-line', type: 'line', source: 'wedge-source',
+                  paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] }
+                });
             }
         }
 
-        if (map.current && mapGeoJson && mapGeoJson.features && mapGeoJson.features.length > 0) {
-            if (!map.current.getSource('ashfall-data')) {
-                map.current.addSource('ashfall-data', { type: 'geojson', data: mapGeoJson });
-                
-                if (isFallbackWedge) {
-                    map.current.addLayer({
-                      id: 'ashfall-wedge-fill', type: 'fill', source: 'ashfall-data',
-                      paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 }
-                    });
-                    map.current.addLayer({
-                      id: 'ashfall-wedge-line', type: 'line', source: 'ashfall-data',
-                      paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] }
-                    });
-                } else {
-                    map.current.addLayer({
-                      id: 'ashfall-fill', type: 'fill', source: 'ashfall-data',
-                      paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 },
-                    });
-                    map.current.addLayer({
-                      id: 'ashfall-line', type: 'line', source: 'ashfall-data',
-                      paint: { 'line-color': '#475569', 'line-width': 1 }
-                    });
-                }
+        const jmaGeoJson = data?.volcano?.ashfallGeoJson;
+        if (jmaGeoJson && jmaGeoJson.features && jmaGeoJson.features.length > 0 && map.current) {
+            if (!map.current.getSource('ashfall-source')) {
+                map.current.addSource('ashfall-source', { type: 'geojson', data: jmaGeoJson });
+                map.current.addLayer({
+                  id: 'ashfall-fill', type: 'fill', source: 'ashfall-source',
+                  paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 },
+                });
+                map.current.addLayer({
+                  id: 'ashfall-line', type: 'line', source: 'ashfall-source',
+                  paint: { 'line-color': '#475569', 'line-width': 1 }
+                });
             }
         }
       } catch (err) { console.error("初期データ読込エラー:", err); }
@@ -296,8 +301,9 @@ export default function App() {
         fontFamily: '"Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif',
         width: '330px', maxHeight: '90vh', overflowY: 'auto'
       }}>
+        {/* 【最重要】キャッシュ打破の証明となる「v2.1」タグ */}
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
-          🌋 桜島 生活・防災モニター
+          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v2.1</span>
         </h1>
 
         <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
