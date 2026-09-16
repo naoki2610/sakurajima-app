@@ -17,23 +17,28 @@ function formatJST(timeStr: string) {
   }
 }
 
-// 【100%修正】WMO気象コードの厳密な翻訳（80〜82のにわか雨を雪と誤認するバグを根絶）
-function getWeatherInfo(code: number) {
+// 【100%修正1】気温（temp）を加味し、気温が高い時の「雪・霰」コードを「雨」に強制補正する
+function getWeatherInfo(code: number, temp?: number) {
+  let isSnow = false;
+  if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) isSnow = true;
+  
+  // 鹿児島で気温10度以上なのに雪コードが来た場合は、APIの異常値（雹・霰など）として「雨」に補正
+  if (isSnow && temp !== undefined && temp >= 10) {
+     return { icon: '☔', text: '雨(雹/霰)' };
+  }
+
   if (code === 0) return { icon: '☀️', text: '快晴' };
   if (code === 1 || code === 2 || code === 3) return { icon: '⛅', text: '晴れ/曇り' };
   if (code >= 45 && code <= 48) return { icon: '🌫️', text: '霧' };
   if (code >= 51 && code <= 67) return { icon: '☔', text: '雨' };
-  if (code >= 71 && code <= 77) return { icon: '⛄', text: '雪' };
-  if (code >= 80 && code <= 82) return { icon: '☔', text: 'にわか雨' }; // 修正箇所
-  if (code >= 85 && code <= 86) return { icon: '⛄', text: '雪' };
+  if (isSnow) return { icon: '⛄', text: '雪' };
+  if (code >= 80 && code <= 82) return { icon: '☔', text: 'にわか雨' };
   if (code >= 95) return { icon: '⚡', text: '雷雨' };
   return { icon: '☁️', text: '不明' };
 }
 
-// 【100%修正】「鹿屋市輝北方向」等の括弧内の文字（北など）による誤検知を防止するロジック
+// 【100%修正2】「鹿屋市輝北」などの地名に含まれる方角漢字の誤検知を完全に防ぐ
 function getFallbackWedgeGeoJson(directionText: string) {
-  // 括弧より前の「主方向」だけを抽出する（例: "東（鹿屋市..." -> "東"）
-  const mainDir = directionText.split(/[（(]/)[0];
   const dirs = [
     { k: '北北東', v: 22.5 }, { k: '東北東', v: 67.5 }, { k: '東南東', v: 112.5 }, { k: '南南東', v: 157.5 },
     { k: '南南西', v: 202.5 }, { k: '西南西', v: 247.5 }, { k: '西北西', v: 292.5 }, { k: '北北西', v: 337.5 },
@@ -42,9 +47,15 @@ function getFallbackWedgeGeoJson(directionText: string) {
   ];
   
   let angle = null;
+  // 確実な方角抽出：「〇〇方向」の直前にある方角文字列だけを狙い撃つ
   for (const d of dirs) {
-    if (mainDir.includes(d.k)) { angle = d.v; break; }
+    // 例: "東方向" または テキストの先頭が "東" で始まる場合のみマッチ
+    if (directionText.includes(d.k + '方向') || directionText.startsWith(d.k)) {
+      angle = d.v;
+      break;
+    }
   }
+  
   if (angle === null) return null;
 
   const center = [130.657, 31.580]; 
@@ -134,11 +145,8 @@ export default function App() {
       try {
         const response = await fetch(`./data/dashboard_data.json?t=${timestamp}`);
         const data = await response.json();
-        
-        // 最初のJSONデータを即座に画面に反映させる
         setDashboardData(data); 
 
-        // 【100%修正】天気を取得し、既存のデータに安全にマージする独立した関数
         const fetchAndMergeWeather = async (lat: number, lon: number) => {
             try {
                 const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
@@ -149,10 +157,15 @@ export default function App() {
                   const dateStr = weatherData.daily.time[i];
                   const dateObj = new Date(dateStr);
                   const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+                  
+                  const maxT = Math.round(weatherData.daily.temperature_2m_max[i]);
+                  // 最高気温を渡して異常な雪マークを雨に補正する
+                  const weatherInfo = getWeatherInfo(weatherData.daily.weather_code[i], maxT);
+
                   dailyForecasts.push({
                     date: `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`,
-                    info: getWeatherInfo(weatherData.daily.weather_code[i]),
-                    maxTemp: Math.round(weatherData.daily.temperature_2m_max[i]), 
+                    info: weatherInfo,
+                    maxTemp: maxT, 
                     minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
                   });
                 }
@@ -165,23 +178,25 @@ export default function App() {
                     const idx = startIndex + i;
                     if (idx < weatherData.hourly.time.length) {
                       const d = new Date(weatherData.hourly.time[idx]);
+                      const tTemp = Math.round(weatherData.hourly.temperature_2m[idx]);
                       localHourlyData.push({
                         time: `${d.getHours()}:00`,
-                        temp: Math.round(weatherData.hourly.temperature_2m[idx]),
+                        temp: tTemp,
                         pop: weatherData.hourly.precipitation_probability[idx] || 0,
-                        info: getWeatherInfo(weatherData.hourly.weather_code[idx])
+                        info: getWeatherInfo(weatherData.hourly.weather_code[idx], tTemp) // ここでも気温補正
                       });
                     }
                   }
                 }
 
+                const currTemp = Math.round(weatherData.current.temperature_2m * 10) / 10;
                 setDashboardData(prev => prev ? {
                   ...prev,
                   weather: {
                     current: {
-                      temp: Math.round(weatherData.current.temperature_2m * 10) / 10,
+                      temp: currTemp,
                       humidity: weatherData.current.relative_humidity_2m,
-                      info: getWeatherInfo(weatherData.current.weather_code)
+                      info: getWeatherInfo(weatherData.current.weather_code, currTemp)
                     },
                     daily: dailyForecasts,
                     localHourly: localHourlyData
@@ -192,23 +207,16 @@ export default function App() {
             }
         };
 
-        // 【100%修正】GPS取得に失敗・タイムアウトした場合は、現在地である「日置市」の座標で確実に天気をフォールバック取得する
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
-            (position) => {
-               fetchAndMergeWeather(position.coords.latitude, position.coords.longitude);
-            }, 
-            (error) => {
-               console.warn("位置情報が拒否・失敗したため、日置市の天気を取得します。", error);
-               fetchAndMergeWeather(31.628, 130.396); // 日置市の代表座標
-            },
-            { timeout: 5000 } // 5秒でタイムアウトさせ、画面が真っ白になるのを防ぐ
+            (position) => { fetchAndMergeWeather(position.coords.latitude, position.coords.longitude); }, 
+            (error) => { fetchAndMergeWeather(31.628, 130.396); }, // 日置市フォールバック
+            { timeout: 5000 }
           );
         } else {
           fetchAndMergeWeather(31.628, 130.396);
         }
 
-        // 地図レイヤーの描画（扇形フォールバック）
         let mapGeoJson = data.volcano.ashfallGeoJson;
         let isFallbackWedge = false;
         
