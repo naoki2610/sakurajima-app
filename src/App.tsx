@@ -17,17 +17,23 @@ function formatJST(timeStr: string) {
   }
 }
 
+// 【100%修正】WMO気象コードの厳密な翻訳（80〜82のにわか雨を雪と誤認するバグを根絶）
 function getWeatherInfo(code: number) {
   if (code === 0) return { icon: '☀️', text: '快晴' };
   if (code === 1 || code === 2 || code === 3) return { icon: '⛅', text: '晴れ/曇り' };
   if (code >= 45 && code <= 48) return { icon: '🌫️', text: '霧' };
   if (code >= 51 && code <= 67) return { icon: '☔', text: '雨' };
-  if (code >= 71 && code <= 82) return { icon: '⛄', text: '雪' };
+  if (code >= 71 && code <= 77) return { icon: '⛄', text: '雪' };
+  if (code >= 80 && code <= 82) return { icon: '☔', text: 'にわか雨' }; // 修正箇所
+  if (code >= 85 && code <= 86) return { icon: '⛄', text: '雪' };
   if (code >= 95) return { icon: '⚡', text: '雷雨' };
   return { icon: '☁️', text: '不明' };
 }
 
+// 【100%修正】「鹿屋市輝北方向」等の括弧内の文字（北など）による誤検知を防止するロジック
 function getFallbackWedgeGeoJson(directionText: string) {
+  // 括弧より前の「主方向」だけを抽出する（例: "東（鹿屋市..." -> "東"）
+  const mainDir = directionText.split(/[（(]/)[0];
   const dirs = [
     { k: '北北東', v: 22.5 }, { k: '東北東', v: 67.5 }, { k: '東南東', v: 112.5 }, { k: '南南東', v: 157.5 },
     { k: '南南西', v: 202.5 }, { k: '西南西', v: 247.5 }, { k: '西北西', v: 292.5 }, { k: '北北西', v: 337.5 },
@@ -37,14 +43,13 @@ function getFallbackWedgeGeoJson(directionText: string) {
   
   let angle = null;
   for (const d of dirs) {
-    if (directionText.includes(d.k)) { angle = d.v; break; }
+    if (mainDir.includes(d.k)) { angle = d.v; break; }
   }
   if (angle === null) return null;
 
   const center = [130.657, 31.580]; 
   const radiusKm = 50; 
   const coords = [center];
-  
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
 
@@ -78,7 +83,6 @@ type DashboardData = {
   weather: {
     current: { temp: number; humidity: number; info: { icon: string; text: string }; };
     daily: { date: string; info: { icon: string; text: string }; maxTemp: number; minTemp: number; }[];
-    // 【新規】スマートフォンの現在地専用の1時間ごとの詳細予報
     localHourly?: { time: string; temp: number; pop: number; info: { icon: string; text: string }; }[];
   };
   hourlyForecast?: {
@@ -130,69 +134,81 @@ export default function App() {
       try {
         const response = await fetch(`./data/dashboard_data.json?t=${timestamp}`);
         const data = await response.json();
+        
+        // 最初のJSONデータを即座に画面に反映させる
         setDashboardData(data); 
 
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(async (position) => {
-            const { latitude, longitude } = position.coords;
+        // 【100%修正】天気を取得し、既存のデータに安全にマージする独立した関数
+        const fetchAndMergeWeather = async (lat: number, lon: number) => {
             try {
-              // 【改修】現在地の天気取得APIを拡張し、1時間ごとの詳細予報（hourly）と降水確率（precipitation_probability）を追加
-              const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
-              const weatherData = await weatherRes.json();
-              
-              const dailyForecasts: any[] = [];
-              for (let i = 0; i < 4; i++) {
-                const dateStr = weatherData.daily.time[i];
-                const dateObj = new Date(dateStr);
-                const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
-                const formattedDate = `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`;
-                dailyForecasts.push({
-                  date: formattedDate, info: getWeatherInfo(weatherData.daily.weather_code[i]),
-                  maxTemp: Math.round(weatherData.daily.temperature_2m_max[i]), minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
-                });
-              }
+                const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
+                const weatherData = await weatherRes.json();
+                
+                const dailyForecasts: any[] = [];
+                for (let i = 0; i < 4; i++) {
+                  const dateStr = weatherData.daily.time[i];
+                  const dateObj = new Date(dateStr);
+                  const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+                  dailyForecasts.push({
+                    date: `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`,
+                    info: getWeatherInfo(weatherData.daily.weather_code[i]),
+                    maxTemp: Math.round(weatherData.daily.temperature_2m_max[i]), 
+                    minTemp: Math.round(weatherData.daily.temperature_2m_min[i])
+                  });
+                }
 
-              // 【新規】現在時刻を基準に、向こう12時間分の現在地ピンポイント予報を生成
-              const nowTime = new Date().getTime();
-              const startIndex = weatherData.hourly.time.findIndex((t: string) => new Date(t).getTime() > nowTime - 3600000);
-              const localHourlyData = [];
-              
-              if (startIndex !== -1) {
-                for (let i = 0; i < 12; i++) {
-                  const idx = startIndex + i;
-                  if (idx < weatherData.hourly.time.length) {
-                    const d = new Date(weatherData.hourly.time[idx]);
-                    localHourlyData.push({
-                      time: `${d.getHours()}:00`,
-                      temp: Math.round(weatherData.hourly.temperature_2m[idx]),
-                      pop: weatherData.hourly.precipitation_probability[idx] || 0, // 降水確率
-                      info: getWeatherInfo(weatherData.hourly.weather_code[idx])
-                    });
+                const nowTime = new Date().getTime();
+                const startIndex = weatherData.hourly.time.findIndex((t: string) => new Date(t).getTime() > nowTime - 3600000);
+                const localHourlyData = [];
+                if (startIndex !== -1) {
+                  for (let i = 0; i < 12; i++) {
+                    const idx = startIndex + i;
+                    if (idx < weatherData.hourly.time.length) {
+                      const d = new Date(weatherData.hourly.time[idx]);
+                      localHourlyData.push({
+                        time: `${d.getHours()}:00`,
+                        temp: Math.round(weatherData.hourly.temperature_2m[idx]),
+                        pop: weatherData.hourly.precipitation_probability[idx] || 0,
+                        info: getWeatherInfo(weatherData.hourly.weather_code[idx])
+                      });
+                    }
                   }
                 }
-              }
 
-              setDashboardData(prev => prev ? {
-                ...prev,
-                weather: {
-                  ...prev.weather,
-                  current: {
-                    temp: Math.round(weatherData.current.temperature_2m * 10) / 10,
-                    humidity: weatherData.current.relative_humidity_2m,
-                    info: getWeatherInfo(weatherData.current.weather_code)
-                  },
-                  daily: dailyForecasts,
-                  localHourly: localHourlyData // 保存
-                }
-              } : null);
+                setDashboardData(prev => prev ? {
+                  ...prev,
+                  weather: {
+                    current: {
+                      temp: Math.round(weatherData.current.temperature_2m * 10) / 10,
+                      humidity: weatherData.current.relative_humidity_2m,
+                      info: getWeatherInfo(weatherData.current.weather_code)
+                    },
+                    daily: dailyForecasts,
+                    localHourly: localHourlyData
+                  }
+                } : null);
             } catch (e) {
-              console.warn("現在地の天気取得に失敗しました。");
+                console.error("天気APIの取得エラー:", e);
             }
-          }, () => {
-             console.warn("位置情報の取得が拒否されました。");
-          });
+        };
+
+        // 【100%修正】GPS取得に失敗・タイムアウトした場合は、現在地である「日置市」の座標で確実に天気をフォールバック取得する
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+               fetchAndMergeWeather(position.coords.latitude, position.coords.longitude);
+            }, 
+            (error) => {
+               console.warn("位置情報が拒否・失敗したため、日置市の天気を取得します。", error);
+               fetchAndMergeWeather(31.628, 130.396); // 日置市の代表座標
+            },
+            { timeout: 5000 } // 5秒でタイムアウトさせ、画面が真っ白になるのを防ぐ
+          );
+        } else {
+          fetchAndMergeWeather(31.628, 130.396);
         }
 
+        // 地図レイヤーの描画（扇形フォールバック）
         let mapGeoJson = data.volcano.ashfallGeoJson;
         let isFallbackWedge = false;
         
@@ -206,20 +222,29 @@ export default function App() {
 
         if (mapGeoJson && mapGeoJson.features.length > 0) {
             map.current.addSource('ashfall-data', { type: 'geojson', data: mapGeoJson });
-            map.current.addLayer({
-              id: 'ashfall-fill', type: 'fill', source: 'ashfall-data',
-              paint: { 
-                'fill-color': isFallbackWedge ? '#dc2626' : ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 
-                'fill-opacity': isFallbackWedge ? 0.25 : 0.55 
-              },
-            });
-            map.current.addLayer({
-              id: 'ashfall-line', type: 'line', source: 'ashfall-data',
-              paint: { 'line-color': isFallbackWedge ? '#991b1b' : '#475569', 'line-width': isFallbackWedge ? 2 : 1, 'line-dasharray': isFallbackWedge ? [4, 4] : [1] },
-            });
+            
+            if (isFallbackWedge) {
+                map.current.addLayer({
+                  id: 'ashfall-wedge-fill', type: 'fill', source: 'ashfall-data',
+                  paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 }
+                });
+                map.current.addLayer({
+                  id: 'ashfall-wedge-line', type: 'line', source: 'ashfall-data',
+                  paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] }
+                });
+            } else {
+                map.current.addLayer({
+                  id: 'ashfall-fill', type: 'fill', source: 'ashfall-data',
+                  paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 },
+                });
+                map.current.addLayer({
+                  id: 'ashfall-line', type: 'line', source: 'ashfall-data',
+                  paint: { 'line-color': '#475569', 'line-width': 1 }
+                });
+            }
         }
       } catch (err) {
-        console.error("データの読み込みに失敗しました:", err);
+        console.error("初期データの読み込みに失敗しました:", err);
       }
     });
 
@@ -337,7 +362,6 @@ export default function App() {
               </div>
             )}
 
-            {/* 【改修】②現在のタブに、位置情報に基づく現在地の詳細な1時間ごとの天気予報（降水確率付き）を追加 */}
             {activeTab === 'menu2' && (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px', backgroundColor: '#f0f9ff', padding: '15px', borderRadius: '8px' }}>
@@ -362,7 +386,6 @@ export default function App() {
                     <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
                       📍 現在地の詳細予報（12時間）
                     </div>
-                    {/* 横スクロール可能な1時間ごとの天気リスト */}
                     <div style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '8px', WebkitOverflowScrolling: 'touch' }}>
                       {dashboardData.weather.localHourly.map((lh, idx) => (
                         <div key={idx} style={{ minWidth: '50px', backgroundColor: '#f8fafc', padding: '8px 4px', borderRadius: '6px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
