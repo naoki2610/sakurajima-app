@@ -65,57 +65,15 @@ function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: stri
   return { icon: '☁️', text: '不明' };
 }
 
-function getFallbackWedgeGeoJson(directionText: string | null | undefined): any {
-  if (!directionText) return null;
-  const match = directionText.match(/(北北東|東北東|東南東|南南東|南南西|西南西|西北西|北北西|北東|南東|南西|北西|北|東|南|西)/);
-  if (!match) return null;
-  
-  const mainDir = match[1];
-  const dirs: Record<string, number> = {
-    '北北東': 22.5, '東北東': 67.5, '東南東': 112.5, '南南東': 157.5,
-    '南南西': 202.5, '西南西': 247.5, '西北西': 292.5, '北北西': 337.5,
-    '北東': 45, '南東': 135, '南西': 225, '北西': 315,
-    '北': 0, '東': 90, '南': 180, '西': 270
-  };
-  
-  const angle = dirs[mainDir];
-  if (angle === undefined) return null;
-
-  const center = [130.659, 31.581]; 
-  const radiusKm = 50; 
-  const coords: number[][] = [[center[0], center[1]]]; 
-  const latPerKm = 1 / 111.32;
-  const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
-
-  for (let i = angle + 25; i >= angle - 25; i -= 5) {
-    const rad = i * Math.PI / 180;
-    const dLat = radiusKm * Math.cos(rad) * latPerKm;
-    const dLon = radiusKm * Math.sin(rad) * lonPerKm;
-    coords.push([center[0] + dLon, center[1] + dLat]);
-  }
-  coords.push([center[0], center[1]]);
-
-  return {
-    type: 'FeatureCollection',
-    features: [{
-      type: 'Feature', 
-      properties: { isFallback: true, amount: '速報目安' }, 
-      geometry: { type: 'Polygon', coordinates: [coords] }
-    }]
-  };
-}
-
 export default function App() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
   
-  // 【100%修正】地図のロード完了を「回数」で厳密に追跡し、Reactの罠を打破する
   const [mapLoadCount, setMapLoadCount] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<string>('menu1');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [timeIndex, setTimeIndex] = useState<number>(3);
 
-  // ① 地図の初期化（ロード完了時に確実にカウンターを回す）
   useEffect(() => {
     if (!mapContainer.current || map.current) return; 
 
@@ -143,19 +101,14 @@ export default function App() {
     }
 
     map.current.on('load', () => {
-        // マップの準備が完了したシグナルを確実に発信
         setMapLoadCount(c => c + 1);
     });
 
     return () => {
-      if (map.current) { 
-        map.current.remove(); 
-        map.current = null; 
-      }
+      if (map.current) { map.current.remove(); map.current = null; }
     };
   }, []);
 
-  // ② データの非同期取得
   useEffect(() => {
     const fetchData = async () => {
       const timestamp = new Date().getTime();
@@ -233,34 +186,62 @@ export default function App() {
     fetchData();
   }, []);
 
-  // ③ 地図の描画（地図のロード回数、またはデータが更新された時のみ確実に発動）
+  // 【100%修正】裏側から送られてくる ashfallGeoJson（扇形またはポリゴン）を単一のソースとして確実に描画する
   useEffect(() => {
     if (!map.current || !dashboardData || mapLoadCount === 0) return;
 
-    // 扇形（警戒コーン）の確実な描画
-    const wedgeGeoJson = getFallbackWedgeGeoJson(dashboardData.volcano.directionText);
-    if (wedgeGeoJson) {
-      if (!map.current.getSource('wedge-source')) {
-        map.current.addSource('wedge-source', { type: 'geojson', data: wedgeGeoJson });
-        map.current.addLayer({ id: 'wedge-fill', type: 'fill', source: 'wedge-source', paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 } });
-        map.current.addLayer({ id: 'wedge-line', type: 'line', source: 'wedge-source', paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] } });
-      } else {
-        (map.current.getSource('wedge-source') as maplibregl.GeoJSONSource).setData(wedgeGeoJson);
-      }
-    } else if (map.current.getSource('wedge-source')) {
-      (map.current.getSource('wedge-source') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features: [] });
-    }
+    const geoJsonData = dashboardData.volcano.ashfallGeoJson;
+    
+    if (geoJsonData && geoJsonData.features && geoJsonData.features.length > 0) {
+      if (!map.current.getSource('unified-ashfall-source')) {
+        map.current.addSource('unified-ashfall-source', { type: 'geojson', data: geoJsonData });
+        
+        // フォールバックの扇形（isFallback）か正式ポリゴンかに応じてスタイルを自動切り替え
+        map.current.addLayer({
+          id: 'unified-ashfall-fill',
+          type: 'fill',
+          source: 'unified-ashfall-source',
+          paint: {
+            'fill-color': [
+              'case',
+              ['boolean', ['get', 'isFallback'], false], '#dc2626', // 扇形なら目立つ赤色
+              ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae']
+            ],
+            'fill-opacity': [
+              'case',
+              ['boolean', ['get', 'isFallback'], false], 0.35,
+              0.55
+            ]
+          }
+        });
 
-    // 気象庁ポリゴンの確実な描画
-    const jmaGeoJson = dashboardData.volcano.ashfallGeoJson;
-    if (jmaGeoJson && jmaGeoJson.features && jmaGeoJson.features.length > 0) {
-      if (!map.current.getSource('ashfall-source')) {
-        map.current.addSource('ashfall-source', { type: 'geojson', data: jmaGeoJson });
-        map.current.addLayer({ id: 'ashfall-fill', type: 'fill', source: 'ashfall-source', paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 } });
-        map.current.addLayer({ id: 'ashfall-line', type: 'line', source: 'ashfall-source', paint: { 'line-color': '#475569', 'line-width': 1 } });
+        map.current.addLayer({
+          id: 'unified-ashfall-line',
+          type: 'line',
+          source: 'unified-ashfall-source',
+          paint: {
+            'line-color': [
+              'case',
+              ['boolean', ['get', 'isFallback'], false], '#991b1b',
+              '#475569'
+            ],
+            'line-width': [
+              'case',
+              ['boolean', ['get', 'isFallback'], false], 2,
+              1
+            ],
+            'line-dasharray': [
+              'case',
+              ['boolean', ['get', 'isFallback'], false], ['literal', [4, 4]],
+              ['literal', [1]]
+            ]
+          }
+        });
       } else {
-        (map.current.getSource('ashfall-source') as maplibregl.GeoJSONSource).setData(jmaGeoJson);
+        (map.current.getSource('unified-ashfall-source') as maplibregl.GeoJSONSource).setData(geoJsonData);
       }
+    } else if (map.current.getSource('unified-ashfall-source')) {
+      (map.current.getSource('unified-ashfall-source') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features: [] });
     }
   }, [dashboardData, mapLoadCount]);
 
@@ -303,7 +284,7 @@ export default function App() {
         width: '330px', maxHeight: '90vh', overflowY: 'auto'
       }}>
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
-          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.0</span>
+          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.1</span>
         </h1>
 
         <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
