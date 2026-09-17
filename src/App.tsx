@@ -64,13 +64,21 @@ function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: stri
   return { icon: '☁️', text: '不明' };
 }
 
-// 【完全自己完結型】方向テキストからダイレクトに扇形ジオメトリを生成
-function getForcedWedgeGeoJson(directionText: string | null | undefined): any {
-  if (!directionText) return null;
+// 【デバッグ強化型】方向テキストから強制的に扇形を作る
+function getDebugWedgeGeoJson(directionText: string | null | undefined): any {
+  if (!directionText) {
+    console.warn("[v5.3 デバッグ] directionText が存在しません。");
+    return null;
+  }
   const match = directionText.match(/(北北東|東北東|東南東|南南東|南南西|西南西|西北西|北北西|北東|南東|南西|北西|北|東|南|西)/);
-  if (!match) return null;
+  if (!match) {
+    console.warn("[v5.3 デバッグ] directionText から方角を抽出できませんでした:", directionText);
+    return null;
+  }
   
   const mainDir = match[1];
+  console.log("[v5.3 デバッグ] 抽出された方角:", mainDir);
+
   const dirs: Record<string, number> = {
     '北北東': 22.5, '東北東': 67.5, '東南東': 112.5, '南南東': 157.5,
     '南南西': 202.5, '西南西': 247.5, '西北西': 292.5, '北北西': 337.5,
@@ -79,15 +87,12 @@ function getForcedWedgeGeoJson(directionText: string | null | undefined): any {
   };
   
   const angle = dirs[mainDir];
-  if (angle === undefined) return null;
-
   const center = [130.659, 31.581]; // 桜島南岳火口
   const radiusKm = 50; 
   const coords: number[][] = [[center[0], center[1]]]; 
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
 
-  // 反時計回りの正しいポリゴン生成
   for (let i = angle + 25; i >= angle - 25; i -= 5) {
     const rad = i * Math.PI / 180;
     const dLat = radiusKm * Math.cos(rad) * latPerKm;
@@ -96,7 +101,7 @@ function getForcedWedgeGeoJson(directionText: string | null | undefined): any {
   }
   coords.push([center[0], center[1]]);
 
-  return {
+  const geoJson = {
     type: 'FeatureCollection',
     features: [{
       type: 'Feature', 
@@ -104,6 +109,9 @@ function getForcedWedgeGeoJson(directionText: string | null | undefined): any {
       geometry: { type: 'Polygon', coordinates: [coords] }
     }]
   };
+
+  console.log("[v5.3 デバッグ] 生成された扇形GeoJSON:", geoJson);
+  return geoJson;
 }
 
 export default function App() {
@@ -141,7 +149,10 @@ export default function App() {
        map.current.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
     }
 
-    map.current.on('load', () => setMapLoaded(true));
+    map.current.on('load', () => {
+      console.log("[v5.3 デバッグ] MapLibre のロードが完了しました。");
+      setMapLoaded(true);
+    });
 
     return () => {
       if (map.current) { map.current.remove(); map.current = null; }
@@ -154,6 +165,7 @@ export default function App() {
       try {
         const response = await fetch(`./data/dashboard_data.json?t=${timestamp}`);
         const data = await response.json();
+        console.log("[v5.3 デバッグ] 取得したダッシュボードデータ:", data);
         
         const fetchWeather = async (lat: number, lon: number) => {
             try {
@@ -225,31 +237,45 @@ export default function App() {
     fetchData();
   }, []);
 
-  // 【強制描画】JSON内のポリゴンデータの有無に関わらず、directionTextからダイレクトに扇形を地図にねじ込む
+  // 【v5.3 徹底検証描画】ソースの有無に関わらず強制的に再設定・描画を行う
   useEffect(() => {
     if (!mapLoaded || !map.current || !dashboardData) return;
 
-    const forcedWedge = getForcedWedgeGeoJson(dashboardData.volcano.directionText);
+    const forcedWedge = getDebugWedgeGeoJson(dashboardData.volcano.directionText);
     const renderGeoJson = forcedWedge || dashboardData.volcano.ashfallGeoJson;
 
     if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
-      if (!map.current.getSource('forced-wedge-source')) {
-        map.current.addSource('forced-wedge-source', { type: 'geojson', data: renderGeoJson });
-        map.current.addLayer({
-          id: 'forced-wedge-fill',
-          type: 'fill',
-          source: 'forced-wedge-source',
-          paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 }
-        });
-        map.current.addLayer({
-          id: 'forced-wedge-line',
-          type: 'line',
-          source: 'forced-wedge-source',
-          paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] }
-        });
+      console.log("[v5.3 デバッグ] マップへ扇形レイヤーを適用します:", renderGeoJson);
+      
+      if (map.current.getSource('debug-wedge-source')) {
+        // 既存のソースがある場合はデータを更新
+        (map.current.getSource('debug-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       } else {
-        (map.current.getSource('forced-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
+        // 新規追加
+        map.current.addSource('debug-wedge-source', { type: 'geojson', data: renderGeoJson });
+        map.current.addLayer({
+          id: 'debug-wedge-fill',
+          type: 'fill',
+          source: 'debug-wedge-source',
+          paint: { 
+            'fill-color': '#dc2626', 
+            'fill-opacity': 0.4 
+          }
+        });
+        map.current.addLayer({
+          id: 'debug-wedge-line',
+          type: 'line',
+          source: 'debug-wedge-source',
+          paint: { 
+            'line-color': '#991b1b', 
+            'line-width': 3, 
+            'line-dasharray': [4, 4] 
+          }
+        });
+        console.log("[v5.3 デバッグ] マップレイヤーの追加が完了しました。");
       }
+    } else {
+      console.warn("[v5.3 デバッグ] 描画するGeoJSONが存在しません。");
     }
   }, [mapLoaded, dashboardData]);
 
@@ -292,7 +318,7 @@ export default function App() {
         width: '330px', maxHeight: '90vh', overflowY: 'auto'
       }}>
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
-          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.2</span>
+          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.3</span>
         </h1>
 
         <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
