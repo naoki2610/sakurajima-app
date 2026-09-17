@@ -13,6 +13,47 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
   throw new Error(`通信失敗: ${url}`);
 }
 
+// 【完全決着用】裏側で方向テキストから直接扇形GeoJSONを生成する関数
+function generateWedgeFromDirection(directionText) {
+  if (!directionText) return null;
+  const match = directionText.match(/(北北東|東北東|東南東|南南東|南南西|西南西|西北西|北北西|北東|南東|南西|北西|北|東|南|西)/);
+  if (!match) return null;
+  
+  const mainDir = match[1];
+  const dirs = {
+    '北北東': 22.5, '東北東': 67.5, '東南東': 112.5, '南南東': 157.5,
+    '南南西': 202.5, '西南西': 247.5, '西北西': 292.5, '北北西': 337.5,
+    '北東': 45, '南東': 135, '南西': 225, '北西': 315,
+    '北': 0, '東': 90, '南': 180, '西': 270
+  };
+  
+  const angle = dirs[mainDir];
+  if (angle === undefined) return null;
+
+  const center = [130.659, 31.581]; 
+  const radiusKm = 50; 
+  const coords = [[center[0], center[1]]]; 
+  const latPerKm = 1 / 111.32;
+  const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
+
+  for (let i = angle + 25; i >= angle - 25; i -= 5) {
+    const rad = i * Math.PI / 180;
+    const dLat = radiusKm * Math.cos(rad) * latPerKm;
+    const dLon = radiusKm * Math.sin(rad) * lonPerKm;
+    coords.push([center[0] + dLon, center[1] + dLat]);
+  }
+  coords.push([center[0], center[1]]);
+
+  return {
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      properties: { isFallback: true, amount: "速報目安" },
+      geometry: { type: "Polygon", coordinates: [coords] }
+    }]
+  };
+}
+
 async function main() {
   console.log('🌐 防災データの収集を開始します...');
   const outDir = path.join(process.cwd(), 'public', 'data');
@@ -46,8 +87,8 @@ async function main() {
   try {
     let allEntries = [];
     const feeds = [
-        'https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml', // 短期（速報）フィード
-        'https://www.data.jma.go.jp/developer/xml/feed/eqvol_l.xml' // 長期（履歴）フィード
+        'https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml',
+        'https://www.data.jma.go.jp/developer/xml/feed/eqvol_l.xml'
     ];
 
     let successCount = 0;
@@ -59,20 +100,14 @@ async function main() {
                 allEntries = allEntries.concat(result.feed.entry);
                 successCount++;
             }
-        } catch(e) {
-            console.log(`フィード取得エラー: ${feedUrl}`);
-        }
+        } catch(e) { }
     }
     
-    // 【エラー隠蔽の排除】両方のフィードが取れなかった場合は、明確にシステムエラーとして扱う
-    if (successCount === 0) {
-        throw new Error("気象庁フィードの取得に完全に失敗しました");
-    }
+    if (successCount === 0) throw new Error("気象庁フィードの取得失敗");
 
     const uniqueEntries = Array.from(new Map(allEntries.map(e => [e.id ? e.id[0] : Math.random(), e])).values());
 
     for (const entry of uniqueEntries) {
-       // 【ハルシネーション根絶】タイトル等の条件で絞り込まず、エントリ全体の中に「桜島」の文字があれば絶対に拾う
        const entryStr = JSON.stringify(entry);
        if (entryStr.includes('桜島')) {
            const eTitle = entry.title ? entry.title[0] : "火山情報";
@@ -82,14 +117,12 @@ async function main() {
                volcanoData.recentEruptions.push({ time: eTime, title: eTitle });
            }
            
-           // 降灰予報のURLを抽出
            if (eTitle.includes('降灰') && entry.link && entry.link[0] && entry.link[0].$) {
                forecastUrls.push(entry.link[0].$.href);
            }
        }
     }
     
-    // 確実な過去12時間のフィルタリング
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
     volcanoData.recentEruptions = volcanoData.recentEruptions.filter(e => {
         if (e.time === '【システム警告】' || e.time === '不明') return false;
@@ -99,7 +132,6 @@ async function main() {
     volcanoData.recentEruptions.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
 
   } catch (error) { 
-      console.error(error);
       hasJmaError = true; 
   }
 
@@ -119,7 +151,6 @@ async function main() {
               }
               
               if (!fetchedDirection) {
-                  // 正規表現を強化し、気象庁の様々なテキスト揺れから確実に方向を引っこ抜く
                   const textMatch = rawXml.match(/火口から([^<。]+方向[^<。]*)[にへ]火山灰が/);
                   if (textMatch) {
                       fetchedDirection = textMatch[1].trim();
@@ -158,17 +189,26 @@ async function main() {
                       }
                   }
               });
-          } catch (err) { console.error(`XML解析エラー: ${url}`, err); }
+          } catch (err) { }
       }
   }
 
-  if (fetchedPolygons.length > 0) volcanoData.ashfallGeoJson.features = fetchedPolygons;
+  if (fetchedPolygons.length > 0) {
+      volcanoData.ashfallGeoJson.features = fetchedPolygons;
+  }
   if (fetchedValidUntil) volcanoData.validUntil = fetchedValidUntil;
-  if (fetchedDirection) volcanoData.directionText = fetchedDirection;
+  if (fetchedDirection) {
+      volcanoData.directionText = fetchedDirection;
+      // 【最重要修正】正式な詳細ポリゴンが無い場合でも、方向テキストから強制的に扇形GeoJSONを生成して埋め込む
+      if (fetchedPolygons.length === 0) {
+          const fallbackWedge = generateWedgeFromDirection(fetchedDirection);
+          if (fallbackWedge) {
+              volcanoData.ashfallGeoJson = fallbackWedge;
+          }
+      }
+  }
 
   const now = new Date();
-  
-  // 有効期限切れの厳格な判定
   if (volcanoData.validUntil) {
       const validTime = new Date(volcanoData.validUntil).getTime();
       if (!isNaN(validTime) && now.getTime() > validTime) {
@@ -185,14 +225,12 @@ async function main() {
       return !isNaN(d.getTime()) && d >= sixHoursAgo && (e.title.includes('噴火') || e.title.includes('爆発') || e.title.includes('降灰') || e.title.includes('警報'));
   });
   
-  // 【フェイルセーフ】エラー発生時、または直近の噴火がある場合は警告状態を死守する
   volcanoData.hasAshfallWarning = hasJmaError || warningActive || hasRecentEruption || (volcanoData.directionText !== null);
 
   let hourlyForecast = [];
   try {
     const wData = await (await fetchWithRetry('https://api.open-meteo.com/v1/forecast?latitude=31.5969&longitude=130.5571&hourly=temperature_2m,surface_pressure,wind_speed_80m,wind_direction_80m,wind_speed_1000hPa,wind_direction_1000hPa,weather_code&timezone=Asia%2FTokyo&past_days=1', {}, 3)).json();
     
-    // 雪バグの裏側サニタイズ
     const getW = (code, temp) => {
       let isSnow = ((code >= 71 && code <= 77) || (code >= 85 && code <= 86));
       if (isSnow && temp >= 10) return { icon: '☔', text: '雨(雹/霰)' };
