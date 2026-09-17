@@ -3,7 +3,7 @@ name: 桜島モニター 統合自動更新システム
 on:
   schedule:
     - cron: '0 * * * *' # 1時間ごとに自動実行
-  workflow_dispatch: # 手動での実行を許可するボタン
+  workflow_dispatch: # 手動実行ボタン
 
 permissions:
   contents: write
