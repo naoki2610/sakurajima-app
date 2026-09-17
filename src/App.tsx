@@ -64,21 +64,13 @@ function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: stri
   return { icon: '☁️', text: '不明' };
 }
 
-// 【デバッグ強化型】方向テキストから強制的に扇形を作る
-function getDebugWedgeGeoJson(directionText: string | null | undefined): any {
-  if (!directionText) {
-    console.warn("[v5.3 デバッグ] directionText が存在しません。");
-    return null;
-  }
+// 【視認性改善】半径を15kmに変更し、画面内に確実に収まる扇形を生成
+function getVisibleWedgeGeoJson(directionText: string | null | undefined): any {
+  if (!directionText) return null;
   const match = directionText.match(/(北北東|東北東|東南東|南南東|南南西|西南西|西北西|北北西|北東|南東|南西|北西|北|東|南|西)/);
-  if (!match) {
-    console.warn("[v5.3 デバッグ] directionText から方角を抽出できませんでした:", directionText);
-    return null;
-  }
+  if (!match) return null;
   
   const mainDir = match[1];
-  console.log("[v5.3 デバッグ] 抽出された方角:", mainDir);
-
   const dirs: Record<string, number> = {
     '北北東': 22.5, '東北東': 67.5, '東南東': 112.5, '南南東': 157.5,
     '南南西': 202.5, '西南西': 247.5, '西北西': 292.5, '北北西': 337.5,
@@ -87,13 +79,15 @@ function getDebugWedgeGeoJson(directionText: string | null | undefined): any {
   };
   
   const angle = dirs[mainDir];
+  if (angle === undefined) return null;
+
   const center = [130.659, 31.581]; // 桜島南岳火口
-  const radiusKm = 50; 
+  const radiusKm = 15; // 50kmから15kmに短縮し、視認性を最大化
   const coords: number[][] = [[center[0], center[1]]]; 
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
 
-  for (let i = angle + 25; i >= angle - 25; i -= 5) {
+  for (let i = angle + 35; i >= angle - 35; i -= 5) { // 視野角を少し広げて視認性向上
     const rad = i * Math.PI / 180;
     const dLat = radiusKm * Math.cos(rad) * latPerKm;
     const dLon = radiusKm * Math.sin(rad) * lonPerKm;
@@ -101,7 +95,7 @@ function getDebugWedgeGeoJson(directionText: string | null | undefined): any {
   }
   coords.push([center[0], center[1]]);
 
-  const geoJson = {
+  return {
     type: 'FeatureCollection',
     features: [{
       type: 'Feature', 
@@ -109,9 +103,6 @@ function getDebugWedgeGeoJson(directionText: string | null | undefined): any {
       geometry: { type: 'Polygon', coordinates: [coords] }
     }]
   };
-
-  console.log("[v5.3 デバッグ] 生成された扇形GeoJSON:", geoJson);
-  return geoJson;
 }
 
 export default function App() {
@@ -141,7 +132,7 @@ export default function App() {
         layers: [{ id: 'osm-layer', type: 'raster', source: 'osm', minzoom: 0, maxzoom: 19 }],
       },
       center: [130.657, 31.580],
-      zoom: 9.5,
+      zoom: 10, // ズームを少し上げて視認性を確保
     });
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -149,10 +140,7 @@ export default function App() {
        map.current.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
     }
 
-    map.current.on('load', () => {
-      console.log("[v5.3 デバッグ] MapLibre のロードが完了しました。");
-      setMapLoaded(true);
-    });
+    map.current.on('load', () => setMapLoaded(true));
 
     return () => {
       if (map.current) { map.current.remove(); map.current = null; }
@@ -165,7 +153,6 @@ export default function App() {
       try {
         const response = await fetch(`./data/dashboard_data.json?t=${timestamp}`);
         const data = await response.json();
-        console.log("[v5.3 デバッグ] 取得したダッシュボードデータ:", data);
         
         const fetchWeather = async (lat: number, lon: number) => {
             try {
@@ -237,45 +224,38 @@ export default function App() {
     fetchData();
   }, []);
 
-  // 【v5.3 徹底検証描画】ソースの有無に関わらず強制的に再設定・描画を行う
+  // 【強制描画＆自動フィット】視認性の高い扇形を確実に描画し、エリア内へカメラを合わせる
   useEffect(() => {
     if (!mapLoaded || !map.current || !dashboardData) return;
 
-    const forcedWedge = getDebugWedgeGeoJson(dashboardData.volcano.directionText);
-    const renderGeoJson = forcedWedge || dashboardData.volcano.ashfallGeoJson;
+    const visibleWedge = getVisibleWedgeGeoJson(dashboardData.volcano.directionText);
+    const renderGeoJson = visibleWedge || dashboardData.volcano.ashfallGeoJson;
 
     if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
-      console.log("[v5.3 デバッグ] マップへ扇形レイヤーを適用します:", renderGeoJson);
-      
-      if (map.current.getSource('debug-wedge-source')) {
-        // 既存のソースがある場合はデータを更新
-        (map.current.getSource('debug-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
-      } else {
-        // 新規追加
-        map.current.addSource('debug-wedge-source', { type: 'geojson', data: renderGeoJson });
+      if (!map.current.getSource('visible-wedge-source')) {
+        map.current.addSource('visible-wedge-source', { type: 'geojson', data: renderGeoJson });
         map.current.addLayer({
-          id: 'debug-wedge-fill',
+          id: 'visible-wedge-fill',
           type: 'fill',
-          source: 'debug-wedge-source',
+          source: 'visible-wedge-source',
           paint: { 
             'fill-color': '#dc2626', 
-            'fill-opacity': 0.4 
+            'fill-opacity': 0.45 
           }
         });
         map.current.addLayer({
-          id: 'debug-wedge-line',
+          id: 'visible-wedge-line',
           type: 'line',
-          source: 'debug-wedge-source',
+          source: 'visible-wedge-source',
           paint: { 
             'line-color': '#991b1b', 
             'line-width': 3, 
             'line-dasharray': [4, 4] 
           }
         });
-        console.log("[v5.3 デバッグ] マップレイヤーの追加が完了しました。");
+      } else {
+        (map.current.getSource('visible-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       }
-    } else {
-      console.warn("[v5.3 デバッグ] 描画するGeoJSONが存在しません。");
     }
   }, [mapLoaded, dashboardData]);
 
@@ -318,7 +298,7 @@ export default function App() {
         width: '330px', maxHeight: '90vh', overflowY: 'auto'
       }}>
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
-          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.3</span>
+          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.4</span>
         </h1>
 
         <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
