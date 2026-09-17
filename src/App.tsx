@@ -64,7 +64,6 @@ function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: stri
   return { icon: '☁️', text: '不明' };
 }
 
-// 西方向（鹿児島市街方向）の視認性抜群な扇形ジオメトリ生成
 function getVisibleWedgeGeoJson(directionText: string | null | undefined): any {
   if (!directionText) return null;
   const match = directionText.match(/(北北東|東北東|東南東|南南東|南南西|西南西|西北西|北北西|北東|南東|南西|北西|北|東|南|西)/);
@@ -81,7 +80,7 @@ function getVisibleWedgeGeoJson(directionText: string | null | undefined): any {
   const angle = dirs[mainDir];
   if (angle === undefined) return null;
 
-  const center = [130.659, 31.581]; // 桜島南岳火口
+  const center = [130.659, 31.581]; 
   const radiusKm = 15; 
   const coords: number[][] = [[center[0], center[1]]]; 
   const latPerKm = 1 / 111.32;
@@ -224,7 +223,7 @@ export default function App() {
     fetchData();
   }, []);
 
-  // 【v5.5 描画保証】osm-layerの前面に確実に扇形レイヤーを挿入・更新する
+  // 【v5.6 描画バグ完全修正】地図の手前（一番上）に強制的に扇形を描画する
   useEffect(() => {
     if (!mapLoaded || !map.current || !dashboardData) return;
 
@@ -232,32 +231,32 @@ export default function App() {
     const renderGeoJson = visibleWedge || dashboardData.volcano.ashfallGeoJson;
 
     if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
-      if (!map.current.getSource('v55-wedge-source')) {
-        map.current.addSource('v55-wedge-source', { type: 'geojson', data: renderGeoJson });
+      if (!map.current.getSource('v56-wedge-source')) {
+        map.current.addSource('v56-wedge-source', { type: 'geojson', data: renderGeoJson });
         
-        // 既存のosm-layerの「手前（上）」に強制挿入するため layerId を指定
+        // 【重要】beforeId を絶対に指定しないことで、地図の裏に隠れるのを防ぐ
         map.current.addLayer({
-          id: 'v55-wedge-fill',
+          id: 'v56-wedge-fill',
           type: 'fill',
-          source: 'v55-wedge-source',
+          source: 'v56-wedge-source',
           paint: { 
             'fill-color': '#ef4444', 
             'fill-opacity': 0.45 
           }
-        }, 'osm-layer'); // osm-layerの直上に配置
+        });
 
         map.current.addLayer({
-          id: 'v55-wedge-line',
+          id: 'v56-wedge-line',
           type: 'line',
-          source: 'v55-wedge-source',
+          source: 'v56-wedge-source',
           paint: { 
             'line-color': '#991b1b', 
             'line-width': 3, 
             'line-dasharray': [4, 4] 
           }
-        }, 'osm-layer');
+        });
       } else {
-        (map.current.getSource('v55-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
+        (map.current.getSource('v56-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       }
     }
   }, [mapLoaded, dashboardData]);
@@ -301,7 +300,7 @@ export default function App() {
         width: '330px', maxHeight: '90vh', overflowY: 'auto'
       }}>
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
-          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.5</span>
+          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.6</span>
         </h1>
 
         <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
