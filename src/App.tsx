@@ -46,7 +46,6 @@ function formatJST(timeStr: string): string {
   } catch (e) { return timeStr; }
 }
 
-// 【雪バグ完全解消】どんな異常値が来ても確実に補正する最強のサニタイザー
 function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: string } {
   const code = Number(codeVal);
   const temp = parseFloat(tempVal);
@@ -54,7 +53,6 @@ function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: stri
   let isSnow = false;
   if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) isSnow = true;
   
-  // 気温が NaN(取得失敗) または 10℃以上なら、雪・霰のコードを「強制的に雨」に丸め込む
   if (isSnow && (isNaN(temp) || temp >= 10)) return { icon: '☔', text: '雨' };
 
   if (code === 0) return { icon: '☀️', text: '快晴' };
@@ -111,13 +109,13 @@ export default function App() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
   
-  // 【アーキテクチャ刷新】地図のロード完了状態を管理するフラグ
-  const [mapLoaded, setMapLoaded] = useState<boolean>(false);
+  // 【100%修正】地図のロード完了を「回数」で厳密に追跡し、Reactの罠を打破する
+  const [mapLoadCount, setMapLoadCount] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<string>('menu1');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [timeIndex, setTimeIndex] = useState<number>(3);
 
-  // ① 地図インスタンスの初期化（1回のみ実行）
+  // ① 地図の初期化（ロード完了時に確実にカウンターを回す）
   useEffect(() => {
     if (!mapContainer.current || map.current) return; 
 
@@ -140,14 +138,24 @@ export default function App() {
     });
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.current.on('load', () => setMapLoaded(true));
+    if (navigator.geolocation) {
+       map.current.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
+    }
+
+    map.current.on('load', () => {
+        // マップの準備が完了したシグナルを確実に発信
+        setMapLoadCount(c => c + 1);
+    });
 
     return () => {
-      if (map.current) { map.current.remove(); map.current = null; }
+      if (map.current) { 
+        map.current.remove(); 
+        map.current = null; 
+      }
     };
   }, []);
 
-  // ② 気象・火山データの非同期取得（1回のみ実行）
+  // ② データの非同期取得
   useEffect(() => {
     const fetchData = async () => {
       const timestamp = new Date().getTime();
@@ -225,11 +233,11 @@ export default function App() {
     fetchData();
   }, []);
 
-  // ③ 地図とデータが両方揃った時のみ発火する、絶対安全なレイヤー描画ロジック
+  // ③ 地図の描画（地図のロード回数、またはデータが更新された時のみ確実に発動）
   useEffect(() => {
-    if (!mapLoaded || !map.current || !dashboardData) return;
+    if (!map.current || !dashboardData || mapLoadCount === 0) return;
 
-    // フォールバック扇形の描画
+    // 扇形（警戒コーン）の確実な描画
     const wedgeGeoJson = getFallbackWedgeGeoJson(dashboardData.volcano.directionText);
     if (wedgeGeoJson) {
       if (!map.current.getSource('wedge-source')) {
@@ -243,9 +251,9 @@ export default function App() {
       (map.current.getSource('wedge-source') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features: [] });
     }
 
-    // 気象庁ポリゴンの描画
+    // 気象庁ポリゴンの確実な描画
     const jmaGeoJson = dashboardData.volcano.ashfallGeoJson;
-    if (jmaGeoJson && jmaGeoJson.features) {
+    if (jmaGeoJson && jmaGeoJson.features && jmaGeoJson.features.length > 0) {
       if (!map.current.getSource('ashfall-source')) {
         map.current.addSource('ashfall-source', { type: 'geojson', data: jmaGeoJson });
         map.current.addLayer({ id: 'ashfall-fill', type: 'fill', source: 'ashfall-source', paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 } });
@@ -254,7 +262,7 @@ export default function App() {
         (map.current.getSource('ashfall-source') as maplibregl.GeoJSONSource).setData(jmaGeoJson);
       }
     }
-  }, [mapLoaded, dashboardData]);
+  }, [dashboardData, mapLoadCount]);
 
   const getLifeAdvice = () => {
     if (!dashboardData) return { laundry: 'データなし', car: 'データなし', color: '#64748b' };
@@ -295,7 +303,7 @@ export default function App() {
         width: '330px', maxHeight: '90vh', overflowY: 'auto'
       }}>
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
-          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v4.0</span>
+          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.0</span>
         </h1>
 
         <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
