@@ -10,11 +10,11 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
     } catch (err) { }
     await new Promise(resolve => setTimeout(resolve, 3000));
   }
-  throw new Error(`通信に完全に失敗しました: ${url}`);
+  throw new Error(`通信失敗: ${url}`);
 }
 
 async function main() {
-  console.log('🌐 総合防災データの収集を開始します...');
+  console.log('🌐 防災データの収集を開始します...');
   const outDir = path.join(process.cwd(), 'public', 'data');
   const dataFile = path.join(outDir, 'dashboard_data.json');
 
@@ -29,7 +29,6 @@ async function main() {
   if (fs.existsSync(dataFile)) {
       try { previousData = JSON.parse(fs.readFileSync(dataFile, 'utf8')).volcano || previousData; } catch (e) { }
   }
-
   try {
       const liveRes = await fetch(`https://raw.githubusercontent.com/naoki2610/sakurajima-app/gh-pages/data/dashboard_data.json?t=${new Date().getTime()}`);
       if (liveRes.ok) {
@@ -42,18 +41,30 @@ async function main() {
   let forecastUrls = [];
   let hasJmaError = false;
 
-  const jmaHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      'Accept': 'application/xml, text/xml, */*; q=0.01'
-  };
+  const jmaHeaders = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Accept': 'application/xml' };
 
+  // 【100%修正】通常の速報(eqvol.xml)に加え、長期履歴(eqvol_l.xml)も取得し、地震スパムによるデータ消失を完全に防ぐ
   try {
-    const response = await fetchWithRetry('https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml', { headers: jmaHeaders }, 3);
-    const xmlData = await response.text();
-    const result = await new xml2js.Parser().parseStringPromise(xmlData);
-    
-    const entries = result.feed?.entry || [];
-    for (const entry of entries) {
+    let allEntries = [];
+    const feeds = [
+        'https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml',
+        'https://www.data.jma.go.jp/developer/xml/feed/eqvol_l.xml' // 数日分の長期履歴フィード
+    ];
+
+    for (const feedUrl of feeds) {
+        try {
+            const xmlData = await (await fetchWithRetry(feedUrl, { headers: jmaHeaders }, 3)).text();
+            const result = await new xml2js.Parser().parseStringPromise(xmlData);
+            if (result.feed && result.feed.entry) {
+                allEntries = allEntries.concat(result.feed.entry);
+            }
+        } catch(e) { console.log(`フィード取得エラー: ${feedUrl}`); }
+    }
+
+    // IDで重複排除（短期と長期の被りをなくす）
+    const uniqueEntries = Array.from(new Map(allEntries.map(e => [e.id[0], e])).values());
+
+    for (const entry of uniqueEntries) {
        const eTitle = entry.title ? entry.title[0] : "";
        const combinedText = eTitle + (entry.content ? JSON.stringify(entry.content) : "");
 
@@ -66,6 +77,7 @@ async function main() {
        }
     }
     
+    // 確実な過去12時間のフィルタリング
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
     volcanoData.recentEruptions = volcanoData.recentEruptions.filter(e => e.time !== '【システム警告】' && e.time !== '不明' && new Date(e.time) >= twelveHoursAgo);
     volcanoData.recentEruptions.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
@@ -76,7 +88,8 @@ async function main() {
   let fetchedDirection = null;
 
   if (forecastUrls.length > 0 && !hasJmaError) {
-      const targetUrls = [...new Set(forecastUrls)].slice(0, 2); 
+      // 最新の降灰予報URLを上位3件まで取得して解析
+      const targetUrls = [...new Set(forecastUrls)].slice(0, 3); 
       for (const url of targetUrls) {
           try {
               const rawXml = await (await fetchWithRetry(url, { headers: jmaHeaders }, 3)).text();
@@ -137,13 +150,14 @@ async function main() {
   let warningActive = volcanoData.validUntil && now <= new Date(volcanoData.validUntil);
   const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
   const hasRecentEruption = volcanoData.recentEruptions.some(e => e.time !== '【システム警告】' && new Date(e.time) >= sixHoursAgo && (e.title.includes('噴火') || e.title.includes('爆発') || e.title.includes('警報')));
+  
   volcanoData.hasAshfallWarning = hasJmaError || warningActive || hasRecentEruption || (volcanoData.directionText !== null);
 
   let hourlyForecast = [];
   try {
     const wData = await (await fetchWithRetry('https://api.open-meteo.com/v1/forecast?latitude=31.5969&longitude=130.5571&hourly=temperature_2m,surface_pressure,wind_speed_80m,wind_direction_80m,wind_speed_1000hPa,wind_direction_1000hPa,weather_code&timezone=Asia%2FTokyo&past_days=1', {}, 3)).json();
     
-    // 【100%修正1】裏側の雪マーク判定にも、気温(temp >= 10)による強制補正を適用
+    // 【100%修正】裏側でも気温による雪補正を徹底
     const getW = (code, temp) => {
       let isSnow = ((code >= 71 && code <= 77) || (code >= 85 && code <= 86));
       if (isSnow && temp >= 10) return { icon: '☔', text: '雨(雹/霰)' };
@@ -156,7 +170,6 @@ async function main() {
       return { icon: '⚡', text: '雷雨' };
     };
 
-    // 【100%修正2】タイムゾーンのバグ解消。UTC環境でも確実に日本時間(JST)の現在時刻を算出してマッチさせる
     const jstNow = new Date(Date.now() + 9 * 3600000);
     const todayStr = jstNow.getUTCFullYear() + "-" + String(jstNow.getUTCMonth() + 1).padStart(2, '0') + "-" + String(jstNow.getUTCDate()).padStart(2, '0');
     const hourStr = String(jstNow.getUTCHours()).padStart(2, '0');
