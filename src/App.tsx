@@ -52,7 +52,6 @@ function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: stri
   
   let isSnow = false;
   if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) isSnow = true;
-  
   if (isSnow && (isNaN(temp) || temp >= 10)) return { icon: '☔', text: '雨' };
 
   if (code === 0) return { icon: '☀️', text: '快晴' };
@@ -65,11 +64,53 @@ function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: stri
   return { icon: '☁️', text: '不明' };
 }
 
+// 【完全自己完結型】方向テキストからダイレクトに扇形ジオメトリを生成
+function getForcedWedgeGeoJson(directionText: string | null | undefined): any {
+  if (!directionText) return null;
+  const match = directionText.match(/(北北東|東北東|東南東|南南東|南南西|西南西|西北西|北北西|北東|南東|南西|北西|北|東|南|西)/);
+  if (!match) return null;
+  
+  const mainDir = match[1];
+  const dirs: Record<string, number> = {
+    '北北東': 22.5, '東北東': 67.5, '東南東': 112.5, '南南東': 157.5,
+    '南南西': 202.5, '西南西': 247.5, '西北西': 292.5, '北北西': 337.5,
+    '北東': 45, '南東': 135, '南西': 225, '北西': 315,
+    '北': 0, '東': 90, '南': 180, '西': 270
+  };
+  
+  const angle = dirs[mainDir];
+  if (angle === undefined) return null;
+
+  const center = [130.659, 31.581]; // 桜島南岳火口
+  const radiusKm = 50; 
+  const coords: number[][] = [[center[0], center[1]]]; 
+  const latPerKm = 1 / 111.32;
+  const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
+
+  // 反時計回りの正しいポリゴン生成
+  for (let i = angle + 25; i >= angle - 25; i -= 5) {
+    const rad = i * Math.PI / 180;
+    const dLat = radiusKm * Math.cos(rad) * latPerKm;
+    const dLon = radiusKm * Math.sin(rad) * lonPerKm;
+    coords.push([center[0] + dLon, center[1] + dLat]);
+  }
+  coords.push([center[0], center[1]]);
+
+  return {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature', 
+      properties: { isFallback: true }, 
+      geometry: { type: 'Polygon', coordinates: [coords] }
+    }]
+  };
+}
+
 export default function App() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
   
-  const [mapLoadCount, setMapLoadCount] = useState<number>(0);
+  const [mapLoaded, setMapLoaded] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>('menu1');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [timeIndex, setTimeIndex] = useState<number>(3);
@@ -100,9 +141,7 @@ export default function App() {
        map.current.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
     }
 
-    map.current.on('load', () => {
-        setMapLoadCount(c => c + 1);
-    });
+    map.current.on('load', () => setMapLoaded(true));
 
     return () => {
       if (map.current) { map.current.remove(); map.current = null; }
@@ -186,64 +225,33 @@ export default function App() {
     fetchData();
   }, []);
 
-  // 【100%修正】裏側から送られてくる ashfallGeoJson（扇形またはポリゴン）を単一のソースとして確実に描画する
+  // 【強制描画】JSON内のポリゴンデータの有無に関わらず、directionTextからダイレクトに扇形を地図にねじ込む
   useEffect(() => {
-    if (!map.current || !dashboardData || mapLoadCount === 0) return;
+    if (!mapLoaded || !map.current || !dashboardData) return;
 
-    const geoJsonData = dashboardData.volcano.ashfallGeoJson;
-    
-    if (geoJsonData && geoJsonData.features && geoJsonData.features.length > 0) {
-      if (!map.current.getSource('unified-ashfall-source')) {
-        map.current.addSource('unified-ashfall-source', { type: 'geojson', data: geoJsonData });
-        
-        // フォールバックの扇形（isFallback）か正式ポリゴンかに応じてスタイルを自動切り替え
+    const forcedWedge = getForcedWedgeGeoJson(dashboardData.volcano.directionText);
+    const renderGeoJson = forcedWedge || dashboardData.volcano.ashfallGeoJson;
+
+    if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
+      if (!map.current.getSource('forced-wedge-source')) {
+        map.current.addSource('forced-wedge-source', { type: 'geojson', data: renderGeoJson });
         map.current.addLayer({
-          id: 'unified-ashfall-fill',
+          id: 'forced-wedge-fill',
           type: 'fill',
-          source: 'unified-ashfall-source',
-          paint: {
-            'fill-color': [
-              'case',
-              ['boolean', ['get', 'isFallback'], false], '#dc2626', // 扇形なら目立つ赤色
-              ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae']
-            ],
-            'fill-opacity': [
-              'case',
-              ['boolean', ['get', 'isFallback'], false], 0.35,
-              0.55
-            ]
-          }
+          source: 'forced-wedge-source',
+          paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 }
         });
-
         map.current.addLayer({
-          id: 'unified-ashfall-line',
+          id: 'forced-wedge-line',
           type: 'line',
-          source: 'unified-ashfall-source',
-          paint: {
-            'line-color': [
-              'case',
-              ['boolean', ['get', 'isFallback'], false], '#991b1b',
-              '#475569'
-            ],
-            'line-width': [
-              'case',
-              ['boolean', ['get', 'isFallback'], false], 2,
-              1
-            ],
-            'line-dasharray': [
-              'case',
-              ['boolean', ['get', 'isFallback'], false], ['literal', [4, 4]],
-              ['literal', [1]]
-            ]
-          }
+          source: 'forced-wedge-source',
+          paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] }
         });
       } else {
-        (map.current.getSource('unified-ashfall-source') as maplibregl.GeoJSONSource).setData(geoJsonData);
+        (map.current.getSource('forced-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       }
-    } else if (map.current.getSource('unified-ashfall-source')) {
-      (map.current.getSource('unified-ashfall-source') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features: [] });
     }
-  }, [dashboardData, mapLoadCount]);
+  }, [mapLoaded, dashboardData]);
 
   const getLifeAdvice = () => {
     if (!dashboardData) return { laundry: 'データなし', car: 'データなし', color: '#64748b' };
@@ -284,7 +292,7 @@ export default function App() {
         width: '330px', maxHeight: '90vh', overflowY: 'auto'
       }}>
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
-          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.1</span>
+          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.2</span>
         </h1>
 
         <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
