@@ -46,15 +46,15 @@ function formatJST(timeStr: string): string {
   } catch (e) { return timeStr; }
 }
 
-// 【100%修正】雪のハルシネーションを絶対に許さない強固な気象コード補正
+// 【雪バグ完全解消】どんな異常値が来ても確実に補正する最強のサニタイザー
 function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: string } {
   const code = Number(codeVal);
-  const temp = Number(tempVal);
+  const temp = parseFloat(tempVal);
   
   let isSnow = false;
   if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) isSnow = true;
   
-  // 気温が10度以上、または取得エラー(NaN)の時にAPIが雪を返してきたら「雨」に強制丸め込み
+  // 気温が NaN(取得失敗) または 10℃以上なら、雪・霰のコードを「強制的に雨」に丸め込む
   if (isSnow && (isNaN(temp) || temp >= 10)) return { icon: '☔', text: '雨' };
 
   if (code === 0) return { icon: '☀️', text: '快晴' };
@@ -67,7 +67,6 @@ function getWeatherInfo(codeVal: any, tempVal?: any): { icon: string; text: stri
   return { icon: '☁️', text: '不明' };
 }
 
-// 【100%修正】確実な方角抽出と、反時計回り(右手の法則)による扇形ポリゴンの生成
 function getFallbackWedgeGeoJson(directionText: string | null | undefined): any {
   if (!directionText) return null;
   const match = directionText.match(/(北北東|東北東|東南東|南南東|南南西|西南西|西北西|北北西|北東|南東|南西|北西|北|東|南|西)/);
@@ -90,7 +89,6 @@ function getFallbackWedgeGeoJson(directionText: string | null | undefined): any 
   const latPerKm = 1 / 111.32;
   const lonPerKm = 1 / (111.32 * Math.cos(center[1] * Math.PI / 180));
 
-  // angle + 25 から減少させて反時計回りの正しいポリゴンにする
   for (let i = angle + 25; i >= angle - 25; i -= 5) {
     const rad = i * Math.PI / 180;
     const dLat = radiusKm * Math.cos(rad) * latPerKm;
@@ -113,13 +111,15 @@ export default function App() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
   
+  // 【アーキテクチャ刷新】地図のロード完了状態を管理するフラグ
+  const [mapLoaded, setMapLoaded] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>('menu1');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [timeIndex, setTimeIndex] = useState<number>(3);
 
+  // ① 地図インスタンスの初期化（1回のみ実行）
   useEffect(() => {
-    if (!mapContainer.current) return;
-    if (map.current) return; 
+    if (!mapContainer.current || map.current) return; 
 
     map.current = new maplibregl.Map({
       container: mapContainer.current,
@@ -130,7 +130,7 @@ export default function App() {
             type: 'raster',
             tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
             tileSize: 256,
-            attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>',
+            attribution: '© OpenStreetMap',
           },
         },
         layers: [{ id: 'osm-layer', type: 'raster', source: 'osm', minzoom: 0, maxzoom: 19 }],
@@ -140,126 +140,121 @@ export default function App() {
     });
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
-    if (navigator.geolocation) {
-       map.current.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
-    }
+    map.current.on('load', () => setMapLoaded(true));
 
-    map.current.on('load', async () => {
-      if (!map.current) return;
-      
+    return () => {
+      if (map.current) { map.current.remove(); map.current = null; }
+    };
+  }, []);
+
+  // ② 気象・火山データの非同期取得（1回のみ実行）
+  useEffect(() => {
+    const fetchData = async () => {
       const timestamp = new Date().getTime();
       try {
         const response = await fetch(`./data/dashboard_data.json?t=${timestamp}`);
         const data = await response.json();
-        setDashboardData(data); 
-
-        const fetchAndMergeWeather = async (lat: number, lon: number) => {
+        
+        const fetchWeather = async (lat: number, lon: number) => {
             try {
                 const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
-                if (!weatherRes.ok) throw new Error("Weather API failed");
-                const weatherData = await weatherRes.json();
+                if (!weatherRes.ok) throw new Error("API failed");
+                const wData = await weatherRes.json();
                 
                 const dailyForecasts: DailyForecast[] = [];
-                if (weatherData?.daily?.time && Array.isArray(weatherData.daily.time)) {
+                if (wData?.daily?.time) {
                     for (let i = 0; i < 4; i++) {
-                      if (!weatherData.daily.time[i]) continue;
-                      const dateObj = new Date(weatherData.daily.time[i]);
-                      const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
-                      const maxT = Number(weatherData.daily.temperature_2m_max[i]);
-                      const minT = Number(weatherData.daily.temperature_2m_min[i]);
+                      if (!wData.daily.time[i]) continue;
+                      const dObj = new Date(wData.daily.time[i]);
+                      const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][dObj.getDay()];
+                      const maxT = parseFloat(wData.daily.temperature_2m_max[i]);
                       dailyForecasts.push({
-                        date: `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`,
-                        info: getWeatherInfo(weatherData.daily.weather_code[i], maxT),
+                        date: `${dObj.getMonth() + 1}/${dObj.getDate()} (${dayOfWeek})`,
+                        info: getWeatherInfo(wData.daily.weather_code[i], maxT),
                         maxTemp: isNaN(maxT) ? 0 : Math.round(maxT), 
-                        minTemp: isNaN(minT) ? 0 : Math.round(minT)
+                        minTemp: Math.round(parseFloat(wData.daily.temperature_2m_min[i]) || 0)
                       });
                     }
                 }
 
                 const localHourlyData: LocalHourlyForecast[] = [];
-                if (weatherData?.hourly?.time && Array.isArray(weatherData.hourly.time)) {
-                    const popArray = weatherData.hourly.precipitation_probability || [];
+                if (wData?.hourly?.time) {
+                    const popArray = wData.hourly.precipitation_probability || [];
                     const nowTime = new Date().getTime();
-                    const startIndex = weatherData.hourly.time.findIndex((t: string) => new Date(t).getTime() > nowTime - 3600000);
+                    const startIndex = wData.hourly.time.findIndex((t: string) => new Date(t).getTime() > nowTime - 3600000);
                     
                     if (startIndex !== -1) {
                       for (let i = 0; i < 12; i++) {
                         const idx = startIndex + i;
-                        if (idx < weatherData.hourly.time.length) {
-                          const d = new Date(weatherData.hourly.time[idx]);
-                          const tTemp = Number(weatherData.hourly.temperature_2m[idx]);
+                        if (idx < wData.hourly.time.length) {
+                          const dObj = new Date(wData.hourly.time[idx]);
+                          const tTemp = parseFloat(wData.hourly.temperature_2m[idx]);
                           localHourlyData.push({
-                            time: `${d.getHours()}:00`, 
+                            time: `${dObj.getHours()}:00`, 
                             temp: isNaN(tTemp) ? 0 : Math.round(tTemp),
-                            pop: Number(popArray[idx]) || 0,
-                            info: getWeatherInfo(weatherData.hourly.weather_code[idx], tTemp)
+                            pop: parseFloat(popArray[idx]) || 0,
+                            info: getWeatherInfo(wData.hourly.weather_code[idx], tTemp)
                           });
                         }
                       }
                     }
                 }
 
-                const currTempRaw = Number(weatherData?.current?.temperature_2m);
-                const currTemp = isNaN(currTempRaw) ? 0 : Math.round(currTempRaw * 10) / 10;
-                setDashboardData(prev => prev ? {
-                  ...prev,
+                const currTemp = Math.round((parseFloat(wData?.current?.temperature_2m) || 0) * 10) / 10;
+                setDashboardData({
+                  ...data,
                   weather: { 
-                    current: { 
-                      temp: currTemp, 
-                      humidity: Number(weatherData?.current?.relative_humidity_2m) || 0, 
-                      info: getWeatherInfo(weatherData?.current?.weather_code, currTemp) 
-                    }, 
+                    current: { temp: currTemp, humidity: parseFloat(wData?.current?.relative_humidity_2m) || 0, info: getWeatherInfo(wData?.current?.weather_code, currTemp) }, 
                     daily: dailyForecasts, 
                     localHourly: localHourlyData 
                   }
-                } : null);
-            } catch (e) { console.error("天気API取得エラー:", e); }
+                });
+            } catch (e) { setDashboardData(data); }
         };
 
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
-            (position) => { fetchAndMergeWeather(position.coords.latitude, position.coords.longitude); }, 
-            () => { fetchAndMergeWeather(31.628, 130.396); },
-            { timeout: 5000 }
+            (pos) => fetchWeather(pos.coords.latitude, pos.coords.longitude), 
+            () => fetchWeather(31.628, 130.396), { timeout: 5000 }
           );
         } else {
-          fetchAndMergeWeather(31.628, 130.396);
+          fetchWeather(31.628, 130.396);
         }
-
-        // 【100%修正】排他制御を廃止し、JMAポリゴンの有無に関わらず「必ず」扇形を別レイヤーとして描画する
-        const wedgeGeoJson = getFallbackWedgeGeoJson(data?.volcano?.directionText);
-        if (wedgeGeoJson && map.current && !map.current.getSource('wedge-source')) {
-            map.current.addSource('wedge-source', { type: 'geojson', data: wedgeGeoJson });
-            map.current.addLayer({
-              id: 'wedge-fill', type: 'fill', source: 'wedge-source',
-              paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 }
-            });
-            map.current.addLayer({
-              id: 'wedge-line', type: 'line', source: 'wedge-source',
-              paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] }
-            });
-        }
-
-        // 気象庁の正式なポリゴンも独立して描画する
-        const jmaGeoJson = data?.volcano?.ashfallGeoJson;
-        if (jmaGeoJson && jmaGeoJson.features && jmaGeoJson.features.length > 0 && map.current && !map.current.getSource('ashfall-source')) {
-            map.current.addSource('ashfall-source', { type: 'geojson', data: jmaGeoJson });
-            map.current.addLayer({
-              id: 'ashfall-fill', type: 'fill', source: 'ashfall-source',
-              paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 },
-            });
-            map.current.addLayer({
-              id: 'ashfall-line', type: 'line', source: 'ashfall-source',
-              paint: { 'line-color': '#475569', 'line-width': 1 }
-            });
-        }
-      } catch (err) { console.error("初期データ読込エラー:", err); }
-    });
-
-    return () => {
-      if (map.current) { map.current.remove(); map.current = null; }
+      } catch (err) { console.error("データ読込エラー", err); }
     };
+    fetchData();
   }, []);
+
+  // ③ 地図とデータが両方揃った時のみ発火する、絶対安全なレイヤー描画ロジック
+  useEffect(() => {
+    if (!mapLoaded || !map.current || !dashboardData) return;
+
+    // フォールバック扇形の描画
+    const wedgeGeoJson = getFallbackWedgeGeoJson(dashboardData.volcano.directionText);
+    if (wedgeGeoJson) {
+      if (!map.current.getSource('wedge-source')) {
+        map.current.addSource('wedge-source', { type: 'geojson', data: wedgeGeoJson });
+        map.current.addLayer({ id: 'wedge-fill', type: 'fill', source: 'wedge-source', paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.35 } });
+        map.current.addLayer({ id: 'wedge-line', type: 'line', source: 'wedge-source', paint: { 'line-color': '#991b1b', 'line-width': 2, 'line-dasharray': [4, 4] } });
+      } else {
+        (map.current.getSource('wedge-source') as maplibregl.GeoJSONSource).setData(wedgeGeoJson);
+      }
+    } else if (map.current.getSource('wedge-source')) {
+      (map.current.getSource('wedge-source') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features: [] });
+    }
+
+    // 気象庁ポリゴンの描画
+    const jmaGeoJson = dashboardData.volcano.ashfallGeoJson;
+    if (jmaGeoJson && jmaGeoJson.features) {
+      if (!map.current.getSource('ashfall-source')) {
+        map.current.addSource('ashfall-source', { type: 'geojson', data: jmaGeoJson });
+        map.current.addLayer({ id: 'ashfall-fill', type: 'fill', source: 'ashfall-source', paint: { 'fill-color': ['match', ['get', 'amount'], '多量', '#e11d48', 'やや多量', '#f97316', '少量', '#eab308', '#8d99ae'], 'fill-opacity': 0.55 } });
+        map.current.addLayer({ id: 'ashfall-line', type: 'line', source: 'ashfall-source', paint: { 'line-color': '#475569', 'line-width': 1 } });
+      } else {
+        (map.current.getSource('ashfall-source') as maplibregl.GeoJSONSource).setData(jmaGeoJson);
+      }
+    }
+  }, [mapLoaded, dashboardData]);
 
   const getLifeAdvice = () => {
     if (!dashboardData) return { laundry: 'データなし', car: 'データなし', color: '#64748b' };
@@ -279,10 +274,7 @@ export default function App() {
     return { text: 'ほぼ安全', color: '#0f766e', bg: '#f0fdf4' };
   };
 
-  const fallbackHourly = Array.from({ length: 7 }).map((_, i) => ({
-    time: `12:00`, offset: i - 3, temp: 25, windSpeed: 3.5, windDir: 180 + i * 30, windSpeed1000m: 5.0, windDir1000m: 190 + i * 30, pressure: 1010, info: { icon: '🌤️', text: '晴れ' }
-  }));
-
+  const fallbackHourly = Array.from({ length: 7 }).map((_, i) => ({ time: `12:00`, offset: i - 3, temp: 25, windSpeed: 3.5, windDir: 180 + i * 30, windSpeed1000m: 5.0, windDir1000m: 190 + i * 30, pressure: 1010, info: { icon: '🌤️', text: '晴れ' } }));
   const hourlyData = dashboardData?.hourlyForecast || fallbackHourly;
   const currentSlideData = hourlyData[timeIndex] || fallbackHourly[3];
   const prevPressure = timeIndex > 0 ? (hourlyData[timeIndex - 1]?.pressure || currentSlideData.pressure) : currentSlideData.pressure;
@@ -303,7 +295,7 @@ export default function App() {
         width: '330px', maxHeight: '90vh', overflowY: 'auto'
       }}>
         <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
-          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v3.0</span>
+          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v4.0</span>
         </h1>
 
         <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
