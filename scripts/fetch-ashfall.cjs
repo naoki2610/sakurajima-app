@@ -43,68 +43,94 @@ async function main() {
 
   const jmaHeaders = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Accept': 'application/xml' };
 
-  // 【100%修正】通常の速報(eqvol.xml)に加え、長期履歴(eqvol_l.xml)も取得し、地震スパムによるデータ消失を完全に防ぐ
   try {
     let allEntries = [];
     const feeds = [
-        'https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml',
-        'https://www.data.jma.go.jp/developer/xml/feed/eqvol_l.xml' // 数日分の長期履歴フィード
+        'https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml', // 短期（速報）フィード
+        'https://www.data.jma.go.jp/developer/xml/feed/eqvol_l.xml' // 長期（履歴）フィード
     ];
 
+    let successCount = 0;
     for (const feedUrl of feeds) {
         try {
             const xmlData = await (await fetchWithRetry(feedUrl, { headers: jmaHeaders }, 3)).text();
             const result = await new xml2js.Parser().parseStringPromise(xmlData);
             if (result.feed && result.feed.entry) {
                 allEntries = allEntries.concat(result.feed.entry);
+                successCount++;
             }
-        } catch(e) { console.log(`フィード取得エラー: ${feedUrl}`); }
+        } catch(e) {
+            console.log(`フィード取得エラー: ${feedUrl}`);
+        }
+    }
+    
+    // 【エラー隠蔽の排除】両方のフィードが取れなかった場合は、明確にシステムエラーとして扱う
+    if (successCount === 0) {
+        throw new Error("気象庁フィードの取得に完全に失敗しました");
     }
 
-    // IDで重複排除（短期と長期の被りをなくす）
-    const uniqueEntries = Array.from(new Map(allEntries.map(e => [e.id[0], e])).values());
+    const uniqueEntries = Array.from(new Map(allEntries.map(e => [e.id ? e.id[0] : Math.random(), e])).values());
 
     for (const entry of uniqueEntries) {
-       const eTitle = entry.title ? entry.title[0] : "";
-       const combinedText = eTitle + (entry.content ? JSON.stringify(entry.content) : "");
-
-       if (combinedText.includes('桜島') && (eTitle.includes('火山') || eTitle.includes('降灰') || eTitle.includes('警報'))) {
+       // 【ハルシネーション根絶】タイトル等の条件で絞り込まず、エントリ全体の中に「桜島」の文字があれば絶対に拾う
+       const entryStr = JSON.stringify(entry);
+       if (entryStr.includes('桜島')) {
+           const eTitle = entry.title ? entry.title[0] : "火山情報";
            const eTime = entry.updated ? entry.updated[0] : null;
+           
            if (eTime && !volcanoData.recentEruptions.some(e => e.time === eTime)) {
                volcanoData.recentEruptions.push({ time: eTime, title: eTitle });
            }
-           if (eTitle.includes('降灰予報')) forecastUrls.push(entry.link[0].$.href);
+           
+           // 降灰予報のURLを抽出
+           if (eTitle.includes('降灰') && entry.link && entry.link[0] && entry.link[0].$) {
+               forecastUrls.push(entry.link[0].$.href);
+           }
        }
     }
     
     // 確実な過去12時間のフィルタリング
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
-    volcanoData.recentEruptions = volcanoData.recentEruptions.filter(e => e.time !== '【システム警告】' && e.time !== '不明' && new Date(e.time) >= twelveHoursAgo);
+    volcanoData.recentEruptions = volcanoData.recentEruptions.filter(e => {
+        if (e.time === '【システム警告】' || e.time === '不明') return false;
+        const d = new Date(e.time);
+        return !isNaN(d.getTime()) && d >= twelveHoursAgo;
+    });
     volcanoData.recentEruptions.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
-  } catch (error) { hasJmaError = true; }
+
+  } catch (error) { 
+      console.error(error);
+      hasJmaError = true; 
+  }
 
   let fetchedPolygons = [];
   let fetchedValidUntil = null;
   let fetchedDirection = null;
 
   if (forecastUrls.length > 0 && !hasJmaError) {
-      // 最新の降灰予報URLを上位3件まで取得して解析
       const targetUrls = [...new Set(forecastUrls)].slice(0, 3); 
       for (const url of targetUrls) {
           try {
               const rawXml = await (await fetchWithRetry(url, { headers: jmaHeaders }, 3)).text();
+              
               if (!fetchedValidUntil) {
                   const validMatch = rawXml.match(/<[^>]*ValidDateTime>([^<]+)<\//);
                   if (validMatch) fetchedValidUntil = validMatch[1].trim();
               }
+              
               if (!fetchedDirection) {
-                  const textMatch = rawXml.match(/火口から([^<。]+方向[^<。]*)[にへ]火山灰が流され/);
-                  if (textMatch) fetchedDirection = textMatch[1].trim();
-                  else {
+                  // 正規表現を強化し、気象庁の様々なテキスト揺れから確実に方向を引っこ抜く
+                  const textMatch = rawXml.match(/火口から([^<。]+方向[^<。]*)[にへ]火山灰が/);
+                  if (textMatch) {
+                      fetchedDirection = textMatch[1].trim();
+                  } else {
                       const pdMatch = rawXml.match(/<[^>]*PlumeDirection[^>]*description="([^"]+)"/);
-                      if (pdMatch && !pdMatch[1].includes('不明')) fetchedDirection = pdMatch[1].trim();
+                      if (pdMatch && !pdMatch[1].includes('不明')) {
+                          fetchedDirection = pdMatch[1].trim();
+                      }
                   }
               }
+              
               const items = rawXml.split(/<[^>]*Item>/i);
               items.forEach(itemStr => {
                   let amount = "不明";
@@ -132,7 +158,7 @@ async function main() {
                       }
                   }
               });
-          } catch (err) { }
+          } catch (err) { console.error(`XML解析エラー: ${url}`, err); }
       }
   }
 
@@ -141,23 +167,32 @@ async function main() {
   if (fetchedDirection) volcanoData.directionText = fetchedDirection;
 
   const now = new Date();
-  if (volcanoData.validUntil && now.getTime() > new Date(volcanoData.validUntil).getTime()) {
-      volcanoData.ashfallGeoJson.features = [];
-      volcanoData.directionText = null;
-      volcanoData.validUntil = null;
+  
+  // 有効期限切れの厳格な判定
+  if (volcanoData.validUntil) {
+      const validTime = new Date(volcanoData.validUntil).getTime();
+      if (!isNaN(validTime) && now.getTime() > validTime) {
+          volcanoData.ashfallGeoJson.features = [];
+          volcanoData.directionText = null;
+          volcanoData.validUntil = null;
+      }
   }
 
-  let warningActive = volcanoData.validUntil && now <= new Date(volcanoData.validUntil);
+  let warningActive = volcanoData.validUntil && now.getTime() <= new Date(volcanoData.validUntil).getTime();
   const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
-  const hasRecentEruption = volcanoData.recentEruptions.some(e => e.time !== '【システム警告】' && new Date(e.time) >= sixHoursAgo && (e.title.includes('噴火') || e.title.includes('爆発') || e.title.includes('警報')));
+  const hasRecentEruption = volcanoData.recentEruptions.some(e => {
+      const d = new Date(e.time);
+      return !isNaN(d.getTime()) && d >= sixHoursAgo && (e.title.includes('噴火') || e.title.includes('爆発') || e.title.includes('降灰') || e.title.includes('警報'));
+  });
   
+  // 【フェイルセーフ】エラー発生時、または直近の噴火がある場合は警告状態を死守する
   volcanoData.hasAshfallWarning = hasJmaError || warningActive || hasRecentEruption || (volcanoData.directionText !== null);
 
   let hourlyForecast = [];
   try {
     const wData = await (await fetchWithRetry('https://api.open-meteo.com/v1/forecast?latitude=31.5969&longitude=130.5571&hourly=temperature_2m,surface_pressure,wind_speed_80m,wind_direction_80m,wind_speed_1000hPa,wind_direction_1000hPa,weather_code&timezone=Asia%2FTokyo&past_days=1', {}, 3)).json();
     
-    // 【100%修正】裏側でも気温による雪補正を徹底
+    // 雪バグの裏側サニタイズ
     const getW = (code, temp) => {
       let isSnow = ((code >= 71 && code <= 77) || (code >= 85 && code <= 86));
       if (isSnow && temp >= 10) return { icon: '☔', text: '雨(雹/霰)' };
