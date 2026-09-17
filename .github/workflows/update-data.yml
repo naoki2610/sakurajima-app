@@ -2,53 +2,37 @@ name: 桜島モニター 統合自動更新システム
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # 毎時15分に全自動実行
-  workflow_dispatch: # 手動実行ボタン
-  push:
-    branches: [ main ] # ファイル更新時も自動実行
+    - cron: '0 * * * *' # 1時間ごとに自動実行
+  workflow_dispatch: # 手動での実行を許可するボタン
 
-# GitHub Pagesへ公開するための必須権限
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  contents: write
 
 jobs:
   build-and-deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: 1. システムファイルの読み込み
+      - name: 1. ソースコードの読み込み
         uses: actions/checkout@v4
 
       - name: 2. 動作環境(Node.js)の構築
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
-      - name: 3. 必要なプログラム部品の導入
-        run: |
-          npm install
-          npm install xml2js
+      - name: 3. 必要なプログラム部品(依存関係)の導入
+        run: npm install
 
-      - name: 4. 🚨【最重要】最新の気象・降灰データの取得
-        # ここで最新のデータを取得し、直後のビルド処理に引き渡します
+      - name: 4. 【最重要】最新の気象・降灰データの取得
         run: node scripts/fetch-ashfall.cjs
 
-      - name: 5. アプリケーションの構築（最新データの組み込み）
+      - name: 5. アプリケーションの構築 (最新データの組み込み)
         run: npm run build
 
-      - name: 6. 公開用データのパッケージング
-        uses: actions/upload-pages-artifact@v3
+      - name: 6. 本番環境(GitHub Pages)へデプロイ
+        uses: peaceiris/actions-gh-pages@v3
         with:
-          path: './dist'
-
-      - name: 7. 本番環境(GitHub Pages)へデプロイ
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          commit_message: "自動更新: 桜島防災データとアプリの同期"
