@@ -202,6 +202,7 @@ export default function App() {
 
                 const currTemp = Math.round((parseFloat(wData?.current?.temperature_2m) || 0) * 10) / 10;
                 
+                // 【v5.12 根本修正】気象庁JSONの構造（areaTypes -> areas -> warnings）に完全準拠した堅牢な抽出ロジック
                 let fetchedWarnings: string[] = [];
                 try {
                     const jmaRes = await fetch('https://www.jma.go.jp/bosai/warning/data/warning/460000.json');
@@ -218,20 +219,27 @@ export default function App() {
                         };
                         
                         const activeSet = new Set<string>();
-                        const parseJSONRecursive = (obj: any) => {
-                            if (!obj || typeof obj !== 'object') return;
-                            if (Array.isArray(obj)) {
-                                obj.forEach(item => parseJSONRecursive(item));
-                            } else {
-                                if (obj.code && warningCodeMap[obj.code] && obj.status && obj.status !== '解除' && obj.status !== '発表警報・注意報はなし') {
-                                    activeSet.add(warningCodeMap[obj.code]);
-                                }
-                                Object.keys(obj).forEach(key => {
-                                    parseJSONRecursive(obj[key]);
+                        const rootArray = Array.isArray(jmaData) ? jmaData : [jmaData];
+                        
+                        rootArray.forEach((item: any) => {
+                            const areaTypes = item?.areaTypes || [];
+                            areaTypes.forEach((at: any) => {
+                                const areas = at?.areas || [];
+                                areas.forEach((area: any) => {
+                                    // 各エリア（自治体ごと）にぶら下がる warnings 配列を正確に走査
+                                    const warnings = area?.warnings || [];
+                                    warnings.forEach((w: any) => {
+                                        if (w && w.code && w.status && w.status !== '解除' && w.status !== '発表警報・注意報はなし') {
+                                            const name = warningCodeMap[w.code];
+                                            if (name) {
+                                                activeSet.add(name);
+                                            }
+                                        }
+                                    });
                                 });
-                            }
-                        };
-                        parseJSONRecursive(jmaData);
+                            });
+                        });
+                        
                         fetchedWarnings = Array.from(activeSet);
                     }
                 } catch (e) {
@@ -270,24 +278,24 @@ export default function App() {
     const renderGeoJson = visibleWedge || dashboardData.volcano.ashfallGeoJson;
 
     if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
-      if (!map.current.getSource('v511-wedge-source')) {
-        map.current.addSource('v511-wedge-source', { type: 'geojson', data: renderGeoJson });
+      if (!map.current.getSource('v512-wedge-source')) {
+        map.current.addSource('v512-wedge-source', { type: 'geojson', data: renderGeoJson });
         
         map.current.addLayer({
-          id: 'v511-wedge-fill',
+          id: 'v512-wedge-fill',
           type: 'fill',
-          source: 'v511-wedge-source',
+          source: 'v512-wedge-source',
           paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.45 }
         });
 
         map.current.addLayer({
-          id: 'v511-wedge-line',
+          id: 'v512-wedge-line',
           type: 'line',
-          source: 'v511-wedge-source',
+          source: 'v512-wedge-source',
           paint: { 'line-color': '#991b1b', 'line-width': 3, 'line-dasharray': [4, 4] }
         });
       } else {
-        (map.current.getSource('v511-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
+        (map.current.getSource('v512-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       }
     }
   }, [mapLoaded, dashboardData]);
@@ -340,7 +348,7 @@ export default function App() {
           paddingBottom: isPanelOpen ? '10px' : '0' 
         }}>
           <h1 style={{ margin: 0, fontSize: '18px', color: '#1e293b' }}>
-            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.11</span>
+            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.12</span>
           </h1>
           <button 
             onClick={() => setIsPanelOpen(!isPanelOpen)}
@@ -419,7 +427,7 @@ export default function App() {
 
                 {activeTab === 'menu2' && (
                   <div>
-                    {/* 【v5.11】気象警報・注意報エリア */}
+                    {/* 【v5.12】正確にパースされた気象警報・注意報エリア */}
                     <div style={{ marginBottom: '15px', backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                       <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
                         🚨 鹿児島県の気象警報・注意報
