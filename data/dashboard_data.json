@@ -1,9 +1,13 @@
 {
   "volcano": {
     "hasAshfallWarning": true,
-    "directionText": "西（鹿児島市街方向）",
-    "validUntil": "2026-09-18T16:23:35.884Z",
+    "directionText": "北西（鹿児島市吉野方向）",
+    "validUntil": "2026-09-18T18:00:15.427Z",
     "recentEruptions": [
+      {
+        "time": "2026-09-18T05:00:00Z",
+        "title": "降灰予報（定時）"
+      },
       {
         "time": "2026-09-18T02:00:00Z",
         "title": "降灰予報（定時）"
@@ -38,10 +42,6 @@
       },
       {
         "time": "2026-09-17T02:00:00Z",
-        "title": "降灰予報（定時）"
-      },
-      {
-        "time": "2026-09-16T23:00:00Z",
         "title": "降灰予報（定時）"
       }
     ],
@@ -94,42 +94,14 @@
   },
   "hourlyForecast": [
     {
-      "time": "10:00",
-      "offset": -3,
-      "temp": 25,
-      "windSpeed": 20.5,
-      "windDir": 74,
-      "windSpeed1000m": 13.3,
-      "windDir1000m": 49,
-      "pressure": 1014.1,
-      "info": {
-        "icon": "☔",
-        "text": "雨"
-      }
-    },
-    {
-      "time": "11:00",
-      "offset": -2,
-      "temp": 26,
-      "windSpeed": 18.3,
-      "windDir": 75,
-      "windSpeed1000m": 11.5,
-      "windDir1000m": 46,
-      "pressure": 1014,
-      "info": {
-        "icon": "☔",
-        "text": "雨"
-      }
-    },
-    {
       "time": "12:00",
-      "offset": -1,
-      "temp": 27,
+      "offset": -3,
+      "temp": 26,
       "windSpeed": 16.9,
       "windDir": 69,
-      "windSpeed1000m": 9.7,
-      "windDir1000m": 45,
-      "pressure": 1013.7,
+      "windSpeed1000m": 6.7,
+      "windDir1000m": 16,
+      "pressure": 1013.6,
       "info": {
         "icon": "☔",
         "text": "雨"
@@ -137,27 +109,27 @@
     },
     {
       "time": "13:00",
-      "offset": 0,
+      "offset": -2,
       "temp": 27,
       "windSpeed": 12.6,
       "windDir": 63,
-      "windSpeed1000m": 8.9,
-      "windDir1000m": 50,
+      "windSpeed1000m": 6.8,
+      "windDir1000m": 32,
       "pressure": 1013.3,
       "info": {
-        "icon": "⛅",
-        "text": "晴れ/曇り"
+        "icon": "☔",
+        "text": "雨"
       }
     },
     {
       "time": "14:00",
-      "offset": 1,
+      "offset": -1,
       "temp": 26,
       "windSpeed": 7.8,
       "windDir": 31,
-      "windSpeed1000m": 8.9,
+      "windSpeed1000m": 8.1,
       "windDir1000m": 58,
-      "pressure": 1012.9,
+      "pressure": 1013.1,
       "info": {
         "icon": "☔",
         "text": "雨"
@@ -165,13 +137,13 @@
     },
     {
       "time": "15:00",
-      "offset": 2,
+      "offset": 0,
       "temp": 26,
       "windSpeed": 6.6,
       "windDir": 22,
-      "windSpeed1000m": 8.9,
-      "windDir1000m": 63,
-      "pressure": 1012.7,
+      "windSpeed1000m": 9.6,
+      "windDir1000m": 70,
+      "pressure": 1012.9,
       "info": {
         "icon": "☔",
         "text": "雨"
@@ -179,13 +151,41 @@
     },
     {
       "time": "16:00",
-      "offset": 3,
+      "offset": 1,
       "temp": 26,
       "windSpeed": 5.8,
       "windDir": 35,
-      "windSpeed1000m": 8.4,
-      "windDir1000m": 65,
-      "pressure": 1012.5,
+      "windSpeed1000m": 9.7,
+      "windDir1000m": 75,
+      "pressure": 1012.8,
+      "info": {
+        "icon": "☔",
+        "text": "雨"
+      }
+    },
+    {
+      "time": "17:00",
+      "offset": 2,
+      "temp": 26,
+      "windSpeed": 10.7,
+      "windDir": 110,
+      "windSpeed1000m": 8.9,
+      "windDir1000m": 76,
+      "pressure": 1012.9,
+      "info": {
+        "icon": "☔",
+        "text": "雨"
+      }
+    },
+    {
+      "time": "18:00",
+      "offset": 3,
+      "temp": 26,
+      "windSpeed": 11.4,
+      "windDir": 93,
+      "windSpeed1000m": 8.2,
+      "windDir1000m": 75,
+      "pressure": 1013,
       "info": {
         "icon": "☔",
         "text": "雨"
