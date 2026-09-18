@@ -26,6 +26,7 @@ interface DashboardData {
     current: { temp: number; humidity: number; info: { icon: string; text: string }; };
     daily: DailyForecast[];
     localHourly?: LocalHourlyForecast[];
+    activeWarnings?: string[]; // 【v5.8追加】気象警報・注意報を格納する配列
   };
   hourlyForecast?: Array<{
     time: string; offset: number; temp: number; windSpeed: number; windDir: number;
@@ -112,8 +113,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('menu1');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [timeIndex, setTimeIndex] = useState<number>(3);
-  
-  // 【新機能】パネルの開閉状態を管理する状態変数
   const [isPanelOpen, setIsPanelOpen] = useState<boolean>(true);
 
   useEffect(() => {
@@ -158,6 +157,7 @@ export default function App() {
         
         const fetchWeather = async (lat: number, lon: number) => {
             try {
+                // 1. Open-Meteoから天気データの取得
                 const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
                 if (!weatherRes.ok) throw new Error("API failed");
                 const wData = await weatherRes.json();
@@ -202,12 +202,47 @@ export default function App() {
                 }
 
                 const currTemp = Math.round((parseFloat(wData?.current?.temperature_2m) || 0) * 10) / 10;
+                
+                // 2. 【v5.8新機能】気象庁APIから直接、鹿児島市の警報・注意報を取得
+                let fetchedWarnings: string[] = [];
+                try {
+                    const jmaRes = await fetch('https://www.jma.go.jp/bosai/warning/data/warning/460000.json');
+                    if (jmaRes.ok) {
+                        const jmaData = await jmaRes.json();
+                        // 気象庁のコードマッピング表
+                        const warningCodeMap: Record<string, string> = {
+                            "02":"暴風警報", "03":"暴風雪警報", "04":"大雨警報", "05":"洪水警報",
+                            "06":"波浪警報", "07":"高潮警報", "08":"大雪警報", "10":"大雨注意報",
+                            "12":"大雪注意報", "13":"強風注意報", "14":"雷注意報", "15":"波浪注意報",
+                            "16":"高潮注意報", "17":"濃霧注意報", "18":"乾燥注意報", "19":"なだれ注意報",
+                            "20":"低温注意報", "21":"霜注意報", "22":"融雪注意報", "23":"着氷注意報",
+                            "24":"着雪注意報", "32":"暴風特別警報", "33":"大雨特別警報", "34":"高潮特別警報",
+                            "35":"波浪特別警報", "36":"大雪特別警報", "37":"暴風雪特別警報"
+                        };
+                        const areaTypes = jmaData[0]?.areaTypes || [];
+                        const class20s = areaTypes.find((a: any) => a.areaType === 'class20s')?.areas || [];
+                        const kagoshimaCity = class20s.find((a: any) => a.code === '4620100'); // 鹿児島市のエリアコード
+                        
+                        if (kagoshimaCity && kagoshimaCity.warnings) {
+                            kagoshimaCity.warnings.forEach((w: any) => {
+                                if (w.status !== '解除' && w.status !== '発表警報・注意報はなし') {
+                                    const name = warningCodeMap[w.code];
+                                    if (name) fetchedWarnings.push(name);
+                                }
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.error("気象庁データの取得に失敗しました", e);
+                }
+
                 setDashboardData({
                   ...data,
                   weather: { 
                     current: { temp: currTemp, humidity: parseFloat(wData?.current?.relative_humidity_2m) || 0, info: getWeatherInfo(wData?.current?.weather_code, currTemp) }, 
                     daily: dailyForecasts, 
-                    localHourly: localHourlyData 
+                    localHourly: localHourlyData,
+                    activeWarnings: fetchedWarnings
                   }
                 });
             } catch (e) { setDashboardData(data); }
@@ -233,31 +268,24 @@ export default function App() {
     const renderGeoJson = visibleWedge || dashboardData.volcano.ashfallGeoJson;
 
     if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
-      if (!map.current.getSource('v57-wedge-source')) {
-        map.current.addSource('v57-wedge-source', { type: 'geojson', data: renderGeoJson });
+      if (!map.current.getSource('v58-wedge-source')) {
+        map.current.addSource('v58-wedge-source', { type: 'geojson', data: renderGeoJson });
         
         map.current.addLayer({
-          id: 'v57-wedge-fill',
+          id: 'v58-wedge-fill',
           type: 'fill',
-          source: 'v57-wedge-source',
-          paint: { 
-            'fill-color': '#ef4444', 
-            'fill-opacity': 0.45 
-          }
+          source: 'v58-wedge-source',
+          paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.45 }
         });
 
         map.current.addLayer({
-          id: 'v57-wedge-line',
+          id: 'v58-wedge-line',
           type: 'line',
-          source: 'v57-wedge-source',
-          paint: { 
-            'line-color': '#991b1b', 
-            'line-width': 3, 
-            'line-dasharray': [4, 4] 
-          }
+          source: 'v58-wedge-source',
+          paint: { 'line-color': '#991b1b', 'line-width': 3, 'line-dasharray': [4, 4] }
         });
       } else {
-        (map.current.getSource('v57-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
+        (map.current.getSource('v58-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       }
     }
   }, [mapLoaded, dashboardData]);
@@ -293,21 +321,16 @@ export default function App() {
     <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, position: 'absolute', top: 0, left: 0 }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 0 }} />
       
-      {/* 【改修】情報パネルのスタイリング変更（半透明＋すりガラス効果） */}
       <div style={{
         position: 'absolute', top: '20px', left: '20px', zIndex: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.85)', // 背景を少し透明に
-        backdropFilter: 'blur(8px)', // すりガラス効果で視認性確保
-        WebkitBackdropFilter: 'blur(8px)', // iOS対応
-        padding: '15px 20px',
-        borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+        backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        padding: '15px 20px', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
         fontFamily: '"Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif',
         width: '330px', maxHeight: '90vh',
-        display: 'flex', flexDirection: 'column',
-        transition: 'all 0.3s ease-in-out' // 開閉時のアニメーション
+        display: 'flex', flexDirection: 'column', transition: 'all 0.3s ease-in-out'
       }}>
         
-        {/* ヘッダー領域（タイトルと開閉ボタン） */}
         <div style={{ 
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           marginBottom: isPanelOpen ? '15px' : '0', 
@@ -315,10 +338,8 @@ export default function App() {
           paddingBottom: isPanelOpen ? '10px' : '0' 
         }}>
           <h1 style={{ margin: 0, fontSize: '18px', color: '#1e293b' }}>
-            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.7</span>
+            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.8</span>
           </h1>
-          
-          {/* 【新機能】開閉トグルボタン */}
           <button 
             onClick={() => setIsPanelOpen(!isPanelOpen)}
             style={{ 
@@ -331,7 +352,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* 開いている時だけ表示される中身の領域 */}
         {isPanelOpen && (
           <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
             <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
@@ -364,12 +384,10 @@ export default function App() {
                         </div>
                       </div>
                     )}
-
                     <div style={{ marginBottom: '12px', backgroundColor: 'rgba(248, 250, 252, 0.9)', padding: '10px', borderRadius: '8px' }}>
                       <div style={{ fontSize: '14px', marginBottom: '6px', color: '#334155' }}>👕 <b>洗濯予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().laundry}</span></div>
                       <div style={{ fontSize: '14px', color: '#334155' }}>🚗 <b>洗車予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().car}</span></div>
                     </div>
-                    
                     <div style={{ marginBottom: '12px', backgroundColor: 'rgba(255, 247, 237, 0.9)', padding: '10px', borderRadius: '8px', border: '1px solid #ffedd5' }}>
                       <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 過去12時間の噴火履歴</p>
                       <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#431407', lineHeight: '1.5', maxHeight: '100px', overflowY: 'auto' }}>
@@ -385,7 +403,6 @@ export default function App() {
                         )}
                       </ul>
                     </div>
-                    
                     <div style={{ fontSize: '14px', color: '#334155' }}>
                       <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 降灰予測エリア</p>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -400,6 +417,29 @@ export default function App() {
 
                 {activeTab === 'menu2' && (
                   <div>
+                    {/* 【v5.8新機能】気象警報・注意報エリア */}
+                    <div style={{ marginBottom: '15px', backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
+                        🚨 鹿児島市の気象警報・注意報
+                      </div>
+                      {dashboardData.weather.activeWarnings && dashboardData.weather.activeWarnings.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {dashboardData.weather.activeWarnings.map((w, idx) => (
+                            <span key={idx} style={{ 
+                              padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold',
+                              backgroundColor: w.includes('特別警報') ? '#4c0519' : w.includes('警報') ? '#dc2626' : '#eab308',
+                              color: w.includes('特別警報') || w.includes('警報') ? '#fff' : '#451a03',
+                              border: w.includes('注意報') ? '1px solid #ca8a04' : 'none'
+                            }}>
+                              {w}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '12px', color: '#64748b' }}>現在、発表されている警報・注意報はありません。</div>
+                      )}
+                    </div>
+
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px', backgroundColor: 'rgba(240, 249, 255, 0.9)', padding: '15px', borderRadius: '8px' }}>
                       <div style={{ fontSize: '32px' }}>{dashboardData.weather.current.info.icon}</div>
                       <div style={{ textAlign: 'right' }}>
@@ -407,6 +447,7 @@ export default function App() {
                         <div style={{ fontSize: '14px', color: '#64748b' }}>湿度: {dashboardData.weather.current.humidity}%</div>
                       </div>
                     </div>
+                    
                     {(() => {
                       const alert = getHeatstrokeAlert(dashboardData.weather.current.temp);
                       return (
