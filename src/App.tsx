@@ -157,7 +157,6 @@ export default function App() {
         
         const fetchWeather = async (lat: number, lon: number) => {
             try {
-                // 1. Open-Meteoから天気データの取得
                 const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`);
                 if (!weatherRes.ok) throw new Error("API failed");
                 const wData = await weatherRes.json();
@@ -203,7 +202,7 @@ export default function App() {
 
                 const currTemp = Math.round((parseFloat(wData?.current?.temperature_2m) || 0) * 10) / 10;
                 
-                // 2. 【v5.9修正】気象庁APIデータの読み取りバグを修正し、日置市を追加
+                // 【v5.10 改善】エリアコードの不一致を回避し、県内の全警報・注意報を確実に網羅するロジック
                 let fetchedWarnings: string[] = [];
                 try {
                     const jmaRes = await fetch('https://www.jma.go.jp/bosai/warning/data/warning/460000.json');
@@ -219,27 +218,24 @@ export default function App() {
                             "35":"波浪特別警報", "36":"大雪特別警報", "37":"暴風雪特別警報"
                         };
                         
-                        // 【バグ修正】オブジェクト形式と配列形式の両方に確実に対応する処理
-                        const dataObj = Array.isArray(jmaData) ? jmaData[0] : jmaData;
-                        const areaTypes = dataObj?.areaTypes || [];
-                        const class20s = areaTypes.find((a: any) => a.areaType === 'class20s')?.areas || [];
-                        
-                        // 鹿児島市(4620100) と 日置市(4621600) の両方を監視
-                        const targetCodes = ['4620100', '4621600']; 
                         const activeSet = new Set<string>();
                         
-                        class20s.forEach((area: any) => {
-                            if (targetCodes.includes(area.code) && area.warnings) {
-                                area.warnings.forEach((w: any) => {
-                                    // 解除・発表なし以外のステータス（「発表」「継続」など）を拾う
-                                    if (w.status !== '解除' && w.status !== '発表警報・注意報はなし') {
-                                        const name = warningCodeMap[w.code];
-                                        if (name) activeSet.add(name);
-                                    }
+                        // JSON内のすべての階層（areaTypes）を再帰的または全走査して、発表中の警告コードをすべて回収する
+                        const parseJSONRecursive = (obj: any) => {
+                            if (!obj || typeof obj !== 'object') return;
+                            if (Array.isArray(obj)) {
+                                obj.forEach(item => parseJSONRecursive(item));
+                            } else {
+                                if (obj.code && warningCodeMap[obj.code] && obj.status && obj.status !== '解除' && obj.status !== '発表警報・注意報はなし') {
+                                    activeSet.add(warningCodeMap[obj.code]);
+                                }
+                                Object.keys(obj).forEach(key => {
+                                    parseJSONRecursive(obj[key]);
                                 });
                             }
-                        });
+                        };
                         
+                        parseJSONRecursive(jmaData);
                         fetchedWarnings = Array.from(activeSet);
                     }
                 } catch (e) {
@@ -278,24 +274,24 @@ export default function App() {
     const renderGeoJson = visibleWedge || dashboardData.volcano.ashfallGeoJson;
 
     if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
-      if (!map.current.getSource('v59-wedge-source')) {
-        map.current.addSource('v59-wedge-source', { type: 'geojson', data: renderGeoJson });
+      if (!map.current.getSource('v510-wedge-source')) {
+        map.current.addSource('v510-wedge-source', { type: 'geojson', data: renderGeoJson });
         
         map.current.addLayer({
-          id: 'v59-wedge-fill',
+          id: 'v510-wedge-fill',
           type: 'fill',
-          source: 'v59-wedge-source',
+          source: 'v510-wedge-source',
           paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.45 }
         });
 
         map.current.addLayer({
-          id: 'v59-wedge-line',
+          id: 'v510-wedge-line',
           type: 'line',
-          source: 'v59-wedge-source',
+          source: 'v510-wedge-source',
           paint: { 'line-color': '#991b1b', 'line-width': 3, 'line-dasharray': [4, 4] }
         });
       } else {
-        (map.current.getSource('v59-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
+        (map.current.getSource('v510-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       }
     }
   }, [mapLoaded, dashboardData]);
@@ -348,7 +344,7 @@ export default function App() {
           paddingBottom: isPanelOpen ? '10px' : '0' 
         }}>
           <h1 style={{ margin: 0, fontSize: '18px', color: '#1e293b' }}>
-            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.9</span>
+            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.10</span>
           </h1>
           <button 
             onClick={() => setIsPanelOpen(!isPanelOpen)}
@@ -427,10 +423,10 @@ export default function App() {
 
                 {activeTab === 'menu2' && (
                   <div>
-                    {/* 【v5.9】鹿児島市・日置市の気象警報・注意報エリア */}
+                    {/* 【v5.10】全県網羅型・気象警報・注意報エリア */}
                     <div style={{ marginBottom: '15px', backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                       <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
-                        🚨 鹿児島市・日置市の気象警報・注意報
+                        🚨 鹿児島県の気象警報・注意報
                       </div>
                       {dashboardData.weather.activeWarnings && dashboardData.weather.activeWarnings.length > 0 ? (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -522,7 +518,7 @@ export default function App() {
                       <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                         <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>ドローン(80m)</div>
                         <div style={{ fontSize: '22px', color: '#0f172a', transform: `rotate(${currentSlideData.windDir + 180}deg)`, transition: 'transform 0.3s ease', display: 'inline-block' }}>⬆</div>
-                        <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed} <span style={{fontSize: '9px'}}>m/s</span></div>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px'}>{currentSlideData.windSpeed} <span style={{fontSize: '9px'}}>m/s</span></div>
                       </div>
                       <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                         <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>桜島火口(1000m)</div>
