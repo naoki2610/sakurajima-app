@@ -112,6 +112,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('menu1');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [timeIndex, setTimeIndex] = useState<number>(3);
+  
+  // 【新機能】パネルの開閉状態を管理する状態変数
+  const [isPanelOpen, setIsPanelOpen] = useState<boolean>(true);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return; 
@@ -223,7 +226,6 @@ export default function App() {
     fetchData();
   }, []);
 
-  // 【v5.6 描画バグ完全修正】地図の手前（一番上）に強制的に扇形を描画する
   useEffect(() => {
     if (!mapLoaded || !map.current || !dashboardData) return;
 
@@ -231,14 +233,13 @@ export default function App() {
     const renderGeoJson = visibleWedge || dashboardData.volcano.ashfallGeoJson;
 
     if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
-      if (!map.current.getSource('v56-wedge-source')) {
-        map.current.addSource('v56-wedge-source', { type: 'geojson', data: renderGeoJson });
+      if (!map.current.getSource('v57-wedge-source')) {
+        map.current.addSource('v57-wedge-source', { type: 'geojson', data: renderGeoJson });
         
-        // 【重要】beforeId を絶対に指定しないことで、地図の裏に隠れるのを防ぐ
         map.current.addLayer({
-          id: 'v56-wedge-fill',
+          id: 'v57-wedge-fill',
           type: 'fill',
-          source: 'v56-wedge-source',
+          source: 'v57-wedge-source',
           paint: { 
             'fill-color': '#ef4444', 
             'fill-opacity': 0.45 
@@ -246,9 +247,9 @@ export default function App() {
         });
 
         map.current.addLayer({
-          id: 'v56-wedge-line',
+          id: 'v57-wedge-line',
           type: 'line',
-          source: 'v56-wedge-source',
+          source: 'v57-wedge-source',
           paint: { 
             'line-color': '#991b1b', 
             'line-width': 3, 
@@ -256,7 +257,7 @@ export default function App() {
           }
         });
       } else {
-        (map.current.getSource('v56-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
+        (map.current.getSource('v57-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       }
     }
   }, [mapLoaded, dashboardData]);
@@ -292,169 +293,201 @@ export default function App() {
     <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, position: 'absolute', top: 0, left: 0 }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 0 }} />
       
+      {/* 【改修】情報パネルのスタイリング変更（半透明＋すりガラス効果） */}
       <div style={{
         position: 'absolute', top: '20px', left: '20px', zIndex: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '15px 20px',
+        backgroundColor: 'rgba(255, 255, 255, 0.85)', // 背景を少し透明に
+        backdropFilter: 'blur(8px)', // すりガラス効果で視認性確保
+        WebkitBackdropFilter: 'blur(8px)', // iOS対応
+        padding: '15px 20px',
         borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
         fontFamily: '"Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif',
-        width: '330px', maxHeight: '90vh', overflowY: 'auto'
+        width: '330px', maxHeight: '90vh',
+        display: 'flex', flexDirection: 'column',
+        transition: 'all 0.3s ease-in-out' // 開閉時のアニメーション
       }}>
-        <h1 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
-          🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.6</span>
-        </h1>
-
-        <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
-          {['menu1', 'menu2', 'menu3', 'menu4'].map((menu, idx) => {
-            const labels = ['①降灰', '②現在', '③週間', '④風推移'];
-            return (
-              <button key={menu} onClick={() => setActiveTab(menu)} 
-                style={{ flex: 1, padding: '8px 2px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', border: 'none', fontWeight: 'bold', 
-                backgroundColor: activeTab === menu ? '#3b82f6' : '#f1f5f9', color: activeTab === menu ? '#fff' : '#475569' }}>
-                {labels[idx]}
-              </button>
-            );
-          })}
+        
+        {/* ヘッダー領域（タイトルと開閉ボタン） */}
+        <div style={{ 
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          marginBottom: isPanelOpen ? '15px' : '0', 
+          borderBottom: isPanelOpen ? '2px solid #e2e8f0' : 'none', 
+          paddingBottom: isPanelOpen ? '10px' : '0' 
+        }}>
+          <h1 style={{ margin: 0, fontSize: '18px', color: '#1e293b' }}>
+            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.7</span>
+          </h1>
+          
+          {/* 【新機能】開閉トグルボタン */}
+          <button 
+            onClick={() => setIsPanelOpen(!isPanelOpen)}
+            style={{ 
+              background: '#f1f5f9', border: 'none', borderRadius: '20px', 
+              padding: '6px 12px', fontSize: '12px', fontWeight: 'bold', 
+              color: '#475569', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}
+          >
+            {isPanelOpen ? '▼ 閉じる' : '▲ 開く'}
+          </button>
         </div>
 
-        {!dashboardData ? (
-          <div style={{ minHeight: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>最新データを取得中...</div>
-        ) : (
-          <div style={{ minHeight: '200px' }}>
-            
-            {activeTab === 'menu1' && (
-              <div>
-                {dashboardData.volcano.directionText && (
-                  <div style={{ marginBottom: '12px', backgroundColor: '#fef2f2', padding: '12px', borderRadius: '8px', border: '2px solid #dc2626', boxShadow: '0 2px 4px rgba(220, 38, 38, 0.2)' }}>
-                    <div style={{ fontWeight: 'bold', color: '#b91c1c', fontSize: '15px', marginBottom: '4px' }}>
-                      ⚠️ 降灰警戒方向: {dashboardData.volcano.directionText}
+        {/* 開いている時だけ表示される中身の領域 */}
+        {isPanelOpen && (
+          <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
+            <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
+              {['menu1', 'menu2', 'menu3', 'menu4'].map((menu, idx) => {
+                const labels = ['①降灰', '②現在', '③週間', '④風推移'];
+                return (
+                  <button key={menu} onClick={() => setActiveTab(menu)} 
+                    style={{ flex: 1, padding: '8px 2px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', border: 'none', fontWeight: 'bold', 
+                    backgroundColor: activeTab === menu ? '#3b82f6' : '#f1f5f9', color: activeTab === menu ? '#fff' : '#475569' }}>
+                    {labels[idx]}
+                  </button>
+                );
+              })}
+            </div>
+
+            {!dashboardData ? (
+              <div style={{ minHeight: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>最新データを取得中...</div>
+            ) : (
+              <div style={{ minHeight: '200px' }}>
+                
+                {activeTab === 'menu1' && (
+                  <div>
+                    {dashboardData.volcano.directionText && (
+                      <div style={{ marginBottom: '12px', backgroundColor: 'rgba(254, 242, 242, 0.9)', padding: '12px', borderRadius: '8px', border: '2px solid #dc2626', boxShadow: '0 2px 4px rgba(220, 38, 38, 0.2)' }}>
+                        <div style={{ fontWeight: 'bold', color: '#b91c1c', fontSize: '15px', marginBottom: '4px' }}>
+                          ⚠️ 降灰警戒方向: {dashboardData.volcano.directionText}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#991b1b', lineHeight: '1.4' }}>
+                           ※地図上の半透明の扇形は目安です。この方向では屋外作業、UAVフライト、洗濯・洗車などの生活判断に十分警戒してください。
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ marginBottom: '12px', backgroundColor: 'rgba(248, 250, 252, 0.9)', padding: '10px', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '14px', marginBottom: '6px', color: '#334155' }}>👕 <b>洗濯予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().laundry}</span></div>
+                      <div style={{ fontSize: '14px', color: '#334155' }}>🚗 <b>洗車予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().car}</span></div>
                     </div>
-                    <div style={{ fontSize: '11px', color: '#991b1b', lineHeight: '1.4' }}>
-                       ※地図上の半透明の扇形は目安です。この方向では屋外作業、UAVフライト、洗濯・洗車などの生活判断に十分警戒してください。
+                    
+                    <div style={{ marginBottom: '12px', backgroundColor: 'rgba(255, 247, 237, 0.9)', padding: '10px', borderRadius: '8px', border: '1px solid #ffedd5' }}>
+                      <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 過去12時間の噴火履歴</p>
+                      <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#431407', lineHeight: '1.5', maxHeight: '100px', overflowY: 'auto' }}>
+                        {dashboardData.volcano.recentEruptions.length === 0 ? (
+                          <li>直近の噴火は観測されていません</li>
+                        ) : (
+                          dashboardData.volcano.recentEruptions.map((eruption, idx) => (
+                            <li key={idx} style={{ marginBottom: '6px', borderBottom: '1px dashed #fed7aa', paddingBottom: '4px' }}>
+                              <div style={{ fontWeight: 'bold', color: '#9a3412', fontSize: '13px' }}>{formatJST(eruption.time)}</div>
+                              <div>{eruption.title}</div>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </div>
+                    
+                    <div style={{ fontSize: '14px', color: '#334155' }}>
+                      <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 降灰予測エリア</p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#e11d48', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '11px' }}>多量</span></div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#f97316', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '11px' }}>やや多量</span></div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#eab308', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '11px' }}>少量</span></div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#dc2626', opacity: 0.25, marginRight: '4px', border: '1px dashed #991b1b' }}></span><span style={{ fontSize: '11px' }}>速報目安</span></div>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                <div style={{ marginBottom: '12px', backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '14px', marginBottom: '6px', color: '#334155' }}>👕 <b>洗濯予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().laundry}</span></div>
-                  <div style={{ fontSize: '14px', color: '#334155' }}>🚗 <b>洗車予想:</b> <span style={{ color: getLifeAdvice().color }}>{getLifeAdvice().car}</span></div>
-                </div>
-                
-                <div style={{ marginBottom: '12px', backgroundColor: '#fff7ed', padding: '10px', borderRadius: '8px', border: '1px solid #ffedd5' }}>
-                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', fontSize: '13px', color: '#c2410c' }}>🌋 過去12時間の噴火履歴</p>
-                  <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#431407', lineHeight: '1.5', maxHeight: '100px', overflowY: 'auto' }}>
-                    {dashboardData.volcano.recentEruptions.length === 0 ? (
-                      <li>直近の噴火は観測されていません</li>
-                    ) : (
-                      dashboardData.volcano.recentEruptions.map((eruption, idx) => (
-                        <li key={idx} style={{ marginBottom: '6px', borderBottom: '1px dashed #fed7aa', paddingBottom: '4px' }}>
-                          <div style={{ fontWeight: 'bold', color: '#9a3412', fontSize: '13px' }}>{formatJST(eruption.time)}</div>
-                          <div>{eruption.title}</div>
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                </div>
-                
-                <div style={{ fontSize: '14px', color: '#334155' }}>
-                  <p style={{ margin: '0 0 6px 0', fontWeight: 'bold' }}>🕒 降灰予測エリア</p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#e11d48', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '11px' }}>多量</span></div>
-                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#f97316', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '11px' }}>やや多量</span></div>
-                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#eab308', opacity: 0.6, marginRight: '4px', border: '1px solid #475569' }}></span><span style={{ fontSize: '11px' }}>少量</span></div>
-                    <div style={{ display: 'flex', alignItems: 'center' }}><span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#dc2626', opacity: 0.25, marginRight: '4px', border: '1px dashed #991b1b' }}></span><span style={{ fontSize: '11px' }}>速報目安</span></div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'menu2' && (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px', backgroundColor: '#f0f9ff', padding: '15px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '32px' }}>{dashboardData.weather.current.info.icon}</div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a' }}>{dashboardData.weather.current.temp}<span style={{ fontSize: '14px' }}>℃</span></div>
-                    <div style={{ fontSize: '14px', color: '#64748b' }}>湿度: {dashboardData.weather.current.humidity}%</div>
-                  </div>
-                </div>
-                {(() => {
-                  const alert = getHeatstrokeAlert(dashboardData.weather.current.temp);
-                  return (
-                    <div style={{ backgroundColor: alert.bg, padding: '10px', borderRadius: '8px', border: `1px solid ${alert.color}40`, marginBottom: '15px' }}>
-                      <div style={{ fontSize: '14px', color: alert.color, fontWeight: 'bold' }}>⚠️ 熱中症: {alert.text.split('（')[0]}</div>
-                      <div style={{ fontSize: '12px', color: alert.color, marginTop: '4px' }}>（{alert.text.split('（')[1]}</div>
-                    </div>
-                  );
-                })()}
-
-                {dashboardData.weather.localHourly && (
+                {activeTab === 'menu2' && (
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
-                      📍 現在地の詳細予報（12時間）
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px', backgroundColor: 'rgba(240, 249, 255, 0.9)', padding: '15px', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '32px' }}>{dashboardData.weather.current.info.icon}</div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a' }}>{dashboardData.weather.current.temp}<span style={{ fontSize: '14px' }}>℃</span></div>
+                        <div style={{ fontSize: '14px', color: '#64748b' }}>湿度: {dashboardData.weather.current.humidity}%</div>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '8px', WebkitOverflowScrolling: 'touch' }}>
-                      {dashboardData.weather.localHourly.map((lh, idx) => (
-                        <div key={idx} style={{ minWidth: '50px', backgroundColor: '#f8fafc', padding: '8px 4px', borderRadius: '6px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>{lh.time}</div>
-                          <div style={{ fontSize: '20px', marginBottom: '4px' }}>{lh.info.icon}</div>
-                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f172a' }}>{lh.temp}℃</div>
-                          <div style={{ fontSize: '10px', color: '#3b82f6', marginTop: '2px' }}>{lh.pop}%</div>
+                    {(() => {
+                      const alert = getHeatstrokeAlert(dashboardData.weather.current.temp);
+                      return (
+                        <div style={{ backgroundColor: alert.bg, padding: '10px', borderRadius: '8px', border: `1px solid ${alert.color}40`, marginBottom: '15px' }}>
+                          <div style={{ fontSize: '14px', color: alert.color, fontWeight: 'bold' }}>⚠️ 熱中症: {alert.text.split('（')[0]}</div>
+                          <div style={{ fontSize: '12px', color: alert.color, marginTop: '4px' }}>（{alert.text.split('（')[1]}</div>
+                        </div>
+                      );
+                    })()}
+
+                    {dashboardData.weather.localHourly && (
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
+                          📍 現在地の詳細予報（12時間）
+                        </div>
+                        <div style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '8px', WebkitOverflowScrolling: 'touch' }}>
+                          {dashboardData.weather.localHourly.map((lh, idx) => (
+                            <div key={idx} style={{ minWidth: '50px', backgroundColor: 'rgba(248, 250, 252, 0.9)', padding: '8px 4px', borderRadius: '6px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                              <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>{lh.time}</div>
+                              <div style={{ fontSize: '20px', marginBottom: '4px' }}>{lh.info.icon}</div>
+                              <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f172a' }}>{lh.temp}℃</div>
+                              <div style={{ fontSize: '10px', color: '#3b82f6', marginTop: '2px' }}>{lh.pop}%</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === 'menu3' && (
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155', marginBottom: '10px' }}>📅 現在地の週間予報</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {dashboardData.weather.daily.map((day, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: idx !== 3 ? '1px solid #f1f5f9' : 'none', paddingBottom: '4px' }}>
+                          <span style={{ width: '70px' }}>{day.date}</span>
+                          <span style={{ width: '30px', textAlign: 'center' }}>{day.info.icon}</span>
+                          <span style={{ color: '#ef4444', width: '35px', textAlign: 'right' }}>{Math.round(day.maxTemp)}℃</span>
+                          <span style={{ color: '#3b82f6', width: '35px', textAlign: 'right' }}>{Math.round(day.minTemp)}℃</span>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
-              </div>
-            )}
 
-            {activeTab === 'menu3' && (
-              <div>
-                <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155', marginBottom: '10px' }}>📅 現在地の週間予報</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {dashboardData.weather.daily.map((day, idx) => (
-                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: idx !== 3 ? '1px solid #f1f5f9' : 'none', paddingBottom: '4px' }}>
-                      <span style={{ width: '70px' }}>{day.date}</span>
-                      <span style={{ width: '30px', textAlign: 'center' }}>{day.info.icon}</span>
-                      <span style={{ color: '#ef4444', width: '35px', textAlign: 'right' }}>{Math.round(day.maxTemp)}℃</span>
-                      <span style={{ color: '#3b82f6', width: '35px', textAlign: 'right' }}>{Math.round(day.minTemp)}℃</span>
+                {activeTab === 'menu4' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155' }}>
+                        {currentSlideData.offset === 0 ? '🕒 現在' : currentSlideData.offset < 0 ? `🕒 ${Math.abs(currentSlideData.offset)}時間前` : `🕒 ${currentSlideData.offset}時間後`} 
+                        <span style={{fontSize: '12px', fontWeight: 'normal', color: '#64748b', marginLeft: '5px'}}>({currentSlideData.time})</span>
+                      </span>
+                      <span style={{ fontSize: '12px', color: trendMsg.color, fontWeight: 'bold' }}>{trendMsg.text}</span>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
-            {activeTab === 'menu4' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155' }}>
-                    {currentSlideData.offset === 0 ? '🕒 現在' : currentSlideData.offset < 0 ? `🕒 ${Math.abs(currentSlideData.offset)}時間前` : `🕒 ${currentSlideData.offset}時間後`} 
-                    <span style={{fontSize: '12px', fontWeight: 'normal', color: '#64748b', marginLeft: '5px'}}>({currentSlideData.time})</span>
-                  </span>
-                  <span style={{ fontSize: '12px', color: trendMsg.color, fontWeight: 'bold' }}>{trendMsg.text}</span>
-                </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(248, 250, 252, 0.9)', padding: '15px 5px', borderRadius: '8px' }}>
+                      <div style={{ textAlign: 'center', width: '28%' }}>
+                        <div style={{ fontSize: '28px' }}>{currentSlideData.info.icon}</div>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.temp}℃</div>
+                      </div>
+                      <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
+                        <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>ドローン(80m)</div>
+                        <div style={{ fontSize: '22px', color: '#0f172a', transform: `rotate(${currentSlideData.windDir + 180}deg)`, transition: 'transform 0.3s ease', display: 'inline-block' }}>⬆</div>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed} <span style={{fontSize: '9px'}}>m/s</span></div>
+                      </div>
+                      <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
+                        <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>桜島火口(1000m)</div>
+                        <div style={{ fontSize: '22px', color: '#e11d48', transform: `rotate(${currentSlideData.windDir1000m + 180}deg)`, transition: 'transform 0.3s ease', display: 'inline-block' }}>⬆</div>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed1000m} <span style={{fontSize: '9px'}}>m/s</span></div>
+                      </div>
+                    </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', padding: '15px 5px', borderRadius: '8px' }}>
-                  <div style={{ textAlign: 'center', width: '28%' }}>
-                    <div style={{ fontSize: '28px' }}>{currentSlideData.info.icon}</div>
-                    <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.temp}℃</div>
+                    <div style={{ marginTop: '10px', padding: '0 5px' }}>
+                      <input type="range" min="0" max="6" step="1" value={timeIndex} onChange={(e) => setTimeIndex(Number(e.target.value))} style={{ width: '100%', cursor: 'pointer' }} />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', marginTop: '5px' }}>
+                        <span>-3h</span><span style={{ fontWeight: timeIndex === 3 ? 'bold' : 'normal', color: timeIndex === 3 ? '#0f172a' : '#64748b' }}>現在</span><span>+3h</span>
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
-                    <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>ドローン(80m)</div>
-                    <div style={{ fontSize: '22px', color: '#0f172a', transform: `rotate(${currentSlideData.windDir + 180}deg)`, transition: 'transform 0.3s ease', display: 'inline-block' }}>⬆</div>
-                    <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed} <span style={{fontSize: '9px'}}>m/s</span></div>
-                  </div>
-                  <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
-                    <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>桜島火口(1000m)</div>
-                    <div style={{ fontSize: '22px', color: '#e11d48', transform: `rotate(${currentSlideData.windDir1000m + 180}deg)`, transition: 'transform 0.3s ease', display: 'inline-block' }}>⬆</div>
-                    <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed1000m} <span style={{fontSize: '9px'}}>m/s</span></div>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: '10px', padding: '0 5px' }}>
-                  <input type="range" min="0" max="6" step="1" value={timeIndex} onChange={(e) => setTimeIndex(Number(e.target.value))} style={{ width: '100%', cursor: 'pointer' }} />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', marginTop: '5px' }}>
-                    <span>-3h</span><span style={{ fontWeight: timeIndex === 3 ? 'bold' : 'normal', color: timeIndex === 3 ? '#0f172a' : '#64748b' }}>現在</span><span>+3h</span>
-                  </div>
-                </div>
+                )}
               </div>
             )}
           </div>
