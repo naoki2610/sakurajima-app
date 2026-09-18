@@ -202,7 +202,6 @@ export default function App() {
 
                 const currTemp = Math.round((parseFloat(wData?.current?.temperature_2m) || 0) * 10) / 10;
                 
-                // 【v5.10 改善】エリアコードの不一致を回避し、県内の全警報・注意報を確実に網羅するロジック
                 let fetchedWarnings: string[] = [];
                 try {
                     const jmaRes = await fetch('https://www.jma.go.jp/bosai/warning/data/warning/460000.json');
@@ -219,8 +218,6 @@ export default function App() {
                         };
                         
                         const activeSet = new Set<string>();
-                        
-                        // JSON内のすべての階層（areaTypes）を再帰的または全走査して、発表中の警告コードをすべて回収する
                         const parseJSONRecursive = (obj: any) => {
                             if (!obj || typeof obj !== 'object') return;
                             if (Array.isArray(obj)) {
@@ -234,7 +231,6 @@ export default function App() {
                                 });
                             }
                         };
-                        
                         parseJSONRecursive(jmaData);
                         fetchedWarnings = Array.from(activeSet);
                     }
@@ -274,24 +270,24 @@ export default function App() {
     const renderGeoJson = visibleWedge || dashboardData.volcano.ashfallGeoJson;
 
     if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
-      if (!map.current.getSource('v510-wedge-source')) {
-        map.current.addSource('v510-wedge-source', { type: 'geojson', data: renderGeoJson });
+      if (!map.current.getSource('v511-wedge-source')) {
+        map.current.addSource('v511-wedge-source', { type: 'geojson', data: renderGeoJson });
         
         map.current.addLayer({
-          id: 'v510-wedge-fill',
+          id: 'v511-wedge-fill',
           type: 'fill',
-          source: 'v510-wedge-source',
+          source: 'v511-wedge-source',
           paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.45 }
         });
 
         map.current.addLayer({
-          id: 'v510-wedge-line',
+          id: 'v511-wedge-line',
           type: 'line',
-          source: 'v510-wedge-source',
+          source: 'v511-wedge-source',
           paint: { 'line-color': '#991b1b', 'line-width': 3, 'line-dasharray': [4, 4] }
         });
       } else {
-        (map.current.getSource('v510-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
+        (map.current.getSource('v511-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       }
     }
   }, [mapLoaded, dashboardData]);
@@ -344,7 +340,7 @@ export default function App() {
           paddingBottom: isPanelOpen ? '10px' : '0' 
         }}>
           <h1 style={{ margin: 0, fontSize: '18px', color: '#1e293b' }}>
-            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.10</span>
+            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.11</span>
           </h1>
           <button 
             onClick={() => setIsPanelOpen(!isPanelOpen)}
@@ -423,7 +419,7 @@ export default function App() {
 
                 {activeTab === 'menu2' && (
                   <div>
-                    {/* 【v5.10】全県網羅型・気象警報・注意報エリア */}
+                    {/* 【v5.11】気象警報・注意報エリア */}
                     <div style={{ marginBottom: '15px', backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                       <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
                         🚨 鹿児島県の気象警報・注意報
@@ -518,12 +514,12 @@ export default function App() {
                       <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                         <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>ドローン(80m)</div>
                         <div style={{ fontSize: '22px', color: '#0f172a', transform: `rotate(${currentSlideData.windDir + 180}deg)`, transition: 'transform 0.3s ease', display: 'inline-block' }}>⬆</div>
-                        <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px'}>{currentSlideData.windSpeed} <span style={{fontSize: '9px'}}>m/s</span></div>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed} <span style={{ fontSize: '9px' }}>m/s</span></div>
                       </div>
                       <div style={{ textAlign: 'center', borderLeft: '1px solid #cbd5e1', paddingLeft: '5px', width: '36%' }}>
                         <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>桜島火口(1000m)</div>
                         <div style={{ fontSize: '22px', color: '#e11d48', transform: `rotate(${currentSlideData.windDir1000m + 180}deg)`, transition: 'transform 0.3s ease', display: 'inline-block' }}>⬆</div>
-                        <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed1000m} <span style={{fontSize: '9px'}}>m/s</span></div>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', marginTop: '4px' }}>{currentSlideData.windSpeed1000m} <span style={{ fontSize: '9px' }}>m/s</span></div>
                       </div>
                     </div>
 
