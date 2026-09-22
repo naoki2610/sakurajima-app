@@ -26,13 +26,21 @@ interface DashboardData {
     current: { temp: number; humidity: number; info: { icon: string; text: string }; };
     daily: DailyForecast[];
     localHourly?: LocalHourlyForecast[];
-    activeWarnings?: string[]; 
   };
   hourlyForecast?: Array<{
     time: string; offset: number; temp: number; windSpeed: number; windDir: number;
     windSpeed1000m: number; windDir1000m: number; pressure: number; info: { icon: string; text: string };
   }>;
 }
+
+// 鹿児島県内の主要エリア定義（緯度・経度から最寄り判定、および気象庁エリアコード紐付け）
+const KAGOSHIMA_AREAS = [
+  { name: '鹿児島市', code: '4620100', lat: 31.5853, lon: 130.5576 },
+  { name: '日置市', code: '4621600', lat: 31.6280, lon: 130.3960 },
+  { name: '姶良市', code: '4622100', lat: 31.7419, lon: 130.6586 },
+  { name: '霧島市', code: '4621800', lat: 31.7347, lon: 130.7617 },
+  { name: '垂水市', code: '4621400', lat: 31.4939, lon: 130.7067 }
+];
 
 function formatJST(timeStr: string): string {
   if (!timeStr || timeStr === '【システム警告】' || timeStr === '不明') return timeStr || '不明';
@@ -114,6 +122,11 @@ export default function App() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [timeIndex, setTimeIndex] = useState<number>(3);
   const [isPanelOpen, setIsPanelOpen] = useState<boolean>(true);
+  
+  // 現在地連動のための状態管理（デフォルトは鹿児島市）
+  const [selectedArea, setSelectedArea] = useState(KAGOSHIMA_AREAS[0]);
+  const [activeWarnings, setActiveWarnings] = useState<string[]>([]);
+  const [locationStatus, setLocationStatus] = useState<string>('GPS取得中...');
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return; 
@@ -138,7 +151,10 @@ export default function App() {
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
     if (navigator.geolocation) {
-       map.current.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }), 'top-right');
+       map.current.addControl(new maplibregl.GeolocateControl({ 
+         positionOptions: { enableHighAccuracy: true }, 
+         trackUserLocation: true 
+       }), 'top-right');
     }
 
     map.current.on('load', () => setMapLoaded(true));
@@ -147,6 +163,80 @@ export default function App() {
       if (map.current) { map.current.remove(); map.current = null; }
     };
   }, []);
+
+  // 【v5.15新機能】GPSによる現在地自動判定とフォールバック処理
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const userLat = pos.coords.latitude;
+          const userLon = pos.coords.longitude;
+          
+          // 最も近い登録エリアを計算で自動選択
+          let closest = KAGOSHIMA_AREAS[0];
+          let minDist = Infinity;
+          KAGOSHIMA_AREAS.forEach(area => {
+            const dist = Math.pow(area.lat - userLat, 2) + Math.pow(area.lon - userLon, 2);
+            if (dist < minDist) {
+              minDist = dist;
+              closest = area;
+            }
+          });
+          setSelectedArea(closest);
+          setLocationStatus(`現在地連動: ${closest.name}`);
+        },
+        () => {
+          // GPS拒否・失敗時はデフォルト（鹿児島市）に安全フォールバック
+          setLocationStatus('GPS未取得（標準: 鹿児島市）');
+        },
+        { timeout: 6000, maximumAge: 60000 }
+      );
+    } else {
+      setLocationStatus('GPS非対応（標準: 鹿児島市）');
+    }
+  }, []);
+
+  // 選択されたエリア（現在地）の気象警報・注意報をリアルタイム取得
+  useEffect(() => {
+    const fetchWarnings = async () => {
+      try {
+        const jmaRes = await fetch('https://www.jma.go.jp/bosai/warning/data/warning/460000.json');
+        if (!jmaRes.ok) return;
+        const jmaData = await jmaRes.json();
+        
+        const warningCodeMap: Record<string, string> = {
+          "02":"暴風警報", "03":"暴風雪警報", "04":"大雨警報", "05":"洪水警報",
+          "06":"波浪警報", "07":"高潮警報", "08":"大雪警報", "10":"大雨注意報",
+          "12":"大雪注意報", "13":"強風注意報", "14":"雷注意報", "15":"波浪注意報",
+          "16":"高潮注意報", "17":"濃霧注意報", "18":"乾燥注意報", "19":"なだれ注意報",
+          "20":"低温注意報", "21":"霜注意報", "22":"融雪注意報", "23":"着氷注意報",
+          "24":"着雪注意報", "32":"暴風特別警報", "33":"大雨特別警報", "34":"高潮特別警報",
+          "35":"波浪特別警報", "36":"大雪特別警報", "37":"暴風雪特別警報"
+        };
+
+        const latestData = Array.isArray(jmaData) ? jmaData[0] : jmaData;
+        const class20s = latestData?.areaTypes?.find((a: any) => a.areaType === 'class20s');
+        
+        if (class20s && class20s.areas) {
+          const targetArea = class20s.areas.find((a: any) => a.code === selectedArea.code);
+          const activeSet = new Set<string>();
+          
+          if (targetArea && targetArea.warnings) {
+            targetArea.warnings.forEach((w: any) => {
+              if (w.status !== '解除' && w.status !== '発表警報・注意報はなし') {
+                const name = warningCodeMap[w.code];
+                if (name) activeSet.add(name);
+              }
+            });
+          }
+          setActiveWarnings(Array.from(activeSet));
+        }
+      } catch (e) {
+        console.error("警報取得エラー", e);
+      }
+    };
+    fetchWarnings();
+  }, [selectedArea]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -201,73 +291,23 @@ export default function App() {
                 }
 
                 const currTemp = Math.round((parseFloat(wData?.current?.temperature_2m) || 0) * 10) / 10;
-                
-                // 【完全修正版】気象庁APIから「鹿児島市(4620100)」と「日置市(4621600)」のデータだけをリアルタイムで直接狙い撃ちする
-                let fetchedWarnings: string[] = [];
-                try {
-                    const jmaRes = await fetch('https://www.jma.go.jp/bosai/warning/data/warning/460000.json');
-                    if (jmaRes.ok) {
-                        const jmaData = await jmaRes.json();
-                        const warningCodeMap: Record<string, string> = {
-                            "02":"暴風警報", "03":"暴風雪警報", "04":"大雨警報", "05":"洪水警報",
-                            "06":"波浪警報", "07":"高潮警報", "08":"大雪警報", "10":"大雨注意報",
-                            "12":"大雪注意報", "13":"強風注意報", "14":"雷注意報", "15":"波浪注意報",
-                            "16":"高潮注意報", "17":"濃霧注意報", "18":"乾燥注意報", "19":"なだれ注意報",
-                            "20":"低温注意報", "21":"霜注意報", "22":"融雪注意報", "23":"着氷注意報",
-                            "24":"着雪注意報", "32":"暴風特別警報", "33":"大雨特別警報", "34":"高潮特別警報",
-                            "35":"波浪特別警報", "36":"大雪特別警報", "37":"暴風雪特別警報"
-                        };
-                        
-                        // 気象庁JSONは配列の[0]に最新データが入る。その中の areaTypes -> class20s に市区町村データが存在する
-                        const latestData = Array.isArray(jmaData) ? jmaData[0] : jmaData;
-                        const class20s = latestData?.areaTypes?.find((a: any) => a.areaType === 'class20s');
-                        
-                        if (class20s && class20s.areas) {
-                            const targetCodes = ['4620100', '4621600']; // 4620100:鹿児島市, 4621600:日置市
-                            const activeSet = new Set<string>();
-                            
-                            class20s.areas.forEach((area: any) => {
-                                if (targetCodes.includes(area.code) && area.warnings) {
-                                    area.warnings.forEach((w: any) => {
-                                        // 解除済み・発表なし を除外し、現在有効な警報・注意報だけを抽出
-                                        if (w.status !== '解除' && w.status !== '発表警報・注意報はなし') {
-                                            const name = warningCodeMap[w.code];
-                                            if (name) activeSet.add(name);
-                                        }
-                                    });
-                                }
-                            });
-                            fetchedWarnings = Array.from(activeSet);
-                        }
-                    }
-                } catch (e) {
-                    console.error("気象庁データの取得に失敗しました", e);
-                }
-
                 setDashboardData({
                   ...data,
                   weather: { 
                     current: { temp: currTemp, humidity: parseFloat(wData?.current?.relative_humidity_2m) || 0, info: getWeatherInfo(wData?.current?.weather_code, currTemp) }, 
                     daily: dailyForecasts, 
-                    localHourly: localHourlyData,
-                    activeWarnings: fetchedWarnings
+                    localHourly: localHourlyData 
                   }
                 });
             } catch (e) { setDashboardData(data); }
         };
 
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => fetchWeather(pos.coords.latitude, pos.coords.longitude), 
-            () => fetchWeather(31.628, 130.396), { timeout: 5000 }
-          );
-        } else {
-          fetchWeather(31.628, 130.396);
-        }
+        // 選択されたエリアの座標を使ってOpen-Meteoの天気を取得
+        fetchWeather(selectedArea.lat, selectedArea.lon);
       } catch (err) { console.error("データ読込エラー", err); }
     };
     fetchData();
-  }, []);
+  }, [selectedArea]);
 
   useEffect(() => {
     if (!mapLoaded || !map.current || !dashboardData) return;
@@ -276,24 +316,24 @@ export default function App() {
     const renderGeoJson = visibleWedge || dashboardData.volcano.ashfallGeoJson;
 
     if (renderGeoJson && renderGeoJson.features && renderGeoJson.features.length > 0) {
-      if (!map.current.getSource('v514-wedge-source')) {
-        map.current.addSource('v514-wedge-source', { type: 'geojson', data: renderGeoJson });
+      if (!map.current.getSource('v515-wedge-source')) {
+        map.current.addSource('v515-wedge-source', { type: 'geojson', data: renderGeoJson });
         
         map.current.addLayer({
-          id: 'v514-wedge-fill',
+          id: 'v515-wedge-fill',
           type: 'fill',
-          source: 'v514-wedge-source',
+          source: 'v515-wedge-source',
           paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.45 }
         });
 
         map.current.addLayer({
-          id: 'v514-wedge-line',
+          id: 'v515-wedge-line',
           type: 'line',
-          source: 'v514-wedge-source',
+          source: 'v515-wedge-source',
           paint: { 'line-color': '#991b1b', 'line-width': 3, 'line-dasharray': [4, 4] }
         });
       } else {
-        (map.current.getSource('v514-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
+        (map.current.getSource('v515-wedge-source') as maplibregl.GeoJSONSource).setData(renderGeoJson);
       }
     }
   }, [mapLoaded, dashboardData]);
@@ -346,7 +386,7 @@ export default function App() {
           paddingBottom: isPanelOpen ? '10px' : '0' 
         }}>
           <h1 style={{ margin: 0, fontSize: '18px', color: '#1e293b' }}>
-            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.14</span>
+            🌋 桜島 生活・防災モニター <span style={{fontSize: '12px', color: '#ef4444', fontWeight: 'bold', marginLeft: '5px'}}>v5.15</span>
           </h1>
           <button 
             onClick={() => setIsPanelOpen(!isPanelOpen)}
@@ -362,6 +402,30 @@ export default function App() {
 
         {isPanelOpen && (
           <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
+            
+            {/* 【v5.15新機能】現在地表示 ＆ 手動エリア切り替えバー */}
+            <div style={{ marginBottom: '12px', backgroundColor: 'rgba(240, 249, 255, 0.9)', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: 'bold' }}>📍 {locationStatus}</span>
+                <span style={{ fontSize: '10px', color: '#64748b' }}>手動切り替え:</span>
+              </div>
+              <select 
+                value={selectedArea.code}
+                onChange={(e) => {
+                  const found = KAGOSHIMA_AREAS.find(a => a.code === e.target.value);
+                  if (found) {
+                    setSelectedArea(found);
+                    setLocationStatus(`手動選択: ${found.name}`);
+                  }
+                }}
+                style={{ width: '100%', padding: '4px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}
+              >
+                {KAGOSHIMA_AREAS.map(area => (
+                  <option key={area.code} value={area.code}>{area.name}</option>
+                ))}
+              </select>
+            </div>
+
             <div style={{ display: 'flex', gap: '4px', marginBottom: '15px' }}>
               {['menu1', 'menu2', 'menu3', 'menu4'].map((menu, idx) => {
                 const labels = ['①降灰', '②現在', '③週間', '④風推移'];
@@ -425,13 +489,14 @@ export default function App() {
 
                 {activeTab === 'menu2' && (
                   <div>
+                    {/* 【v5.15】現在地の気象警報・注意報エリア */}
                     <div style={{ marginBottom: '15px', backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                       <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
-                        🚨 鹿児島市・日置市の気象警報・注意報
+                        🚨 {selectedArea.name}の気象警報・注意報
                       </div>
-                      {dashboardData.weather.activeWarnings && dashboardData.weather.activeWarnings.length > 0 ? (
+                      {activeWarnings.length > 0 ? (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                          {dashboardData.weather.activeWarnings.map((w, idx) => (
+                          {activeWarnings.map((w, idx) => (
                             <span key={idx} style={{ 
                               padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold',
                               backgroundColor: w.includes('特別警報') ? '#4c0519' : w.includes('警報') ? '#dc2626' : '#eab308',
