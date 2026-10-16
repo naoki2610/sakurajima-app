@@ -2,8 +2,12 @@
   "volcano": {
     "hasAshfallWarning": true,
     "directionText": "西（鹿児島市街方向）",
-    "validUntil": "2026-10-17T03:51:35.140Z",
+    "validUntil": "2026-10-17T07:04:44.155Z",
     "recentEruptions": [
+      {
+        "time": "2026-10-16T17:00:00Z",
+        "title": "降灰予報（定時）"
+      },
       {
         "time": "2026-10-16T14:00:00Z",
         "title": "降灰予報（定時）"
@@ -39,10 +43,6 @@
       {
         "time": "2026-10-15T22:10:36Z",
         "title": "噴火に関する火山観測報"
-      },
-      {
-        "time": "2026-10-15T20:00:00Z",
-        "title": "降灰予報（定時）"
       }
     ],
     "ashfallGeoJson": {
@@ -94,83 +94,13 @@
   },
   "hourlyForecast": [
     {
-      "time": "21:00",
-      "offset": -3,
-      "temp": 22,
-      "windSpeed": 15.5,
-      "windDir": 81,
-      "windSpeed1000m": 12.6,
-      "windDir1000m": 93,
-      "pressure": 1022.5,
-      "info": {
-        "icon": "⛅",
-        "text": "晴れ/曇り"
-      }
-    },
-    {
-      "time": "22:00",
-      "offset": -2,
-      "temp": 22,
-      "windSpeed": 15.6,
-      "windDir": 78,
-      "windSpeed1000m": 12.6,
-      "windDir1000m": 88,
-      "pressure": 1022.7,
-      "info": {
-        "icon": "⛅",
-        "text": "晴れ/曇り"
-      }
-    },
-    {
-      "time": "23:00",
-      "offset": -1,
-      "temp": 22,
-      "windSpeed": 14.3,
-      "windDir": 75,
-      "windSpeed1000m": 12.8,
-      "windDir1000m": 79,
-      "pressure": 1022.7,
-      "info": {
-        "icon": "⛅",
-        "text": "晴れ/曇り"
-      }
-    },
-    {
-      "time": "0:00",
-      "offset": 0,
-      "temp": 21,
-      "windSpeed": 13.1,
-      "windDir": 72,
-      "windSpeed1000m": 13.4,
-      "windDir1000m": 70,
-      "pressure": 1022.6,
-      "info": {
-        "icon": "⛅",
-        "text": "晴れ/曇り"
-      }
-    },
-    {
       "time": "1:00",
-      "offset": 1,
+      "offset": -3,
       "temp": 21,
       "windSpeed": 15,
       "windDir": 66,
-      "windSpeed1000m": 14.8,
-      "windDir1000m": 67,
-      "pressure": 1022.6,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "2:00",
-      "offset": 2,
-      "temp": 21,
-      "windSpeed": 17.4,
-      "windDir": 60,
-      "windSpeed1000m": 16.6,
-      "windDir1000m": 66,
+      "windSpeed1000m": 11.8,
+      "windDir1000m": 70,
       "pressure": 1022.8,
       "info": {
         "icon": "☀️",
@@ -178,17 +108,87 @@
       }
     },
     {
+      "time": "2:00",
+      "offset": -2,
+      "temp": 21,
+      "windSpeed": 17.4,
+      "windDir": 60,
+      "windSpeed1000m": 14.8,
+      "windDir1000m": 64,
+      "pressure": 1022.9,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
       "time": "3:00",
-      "offset": 3,
+      "offset": -1,
       "temp": 21,
       "windSpeed": 15.9,
       "windDir": 59,
-      "windSpeed1000m": 17.3,
-      "windDir1000m": 67,
+      "windSpeed1000m": 16.3,
+      "windDir1000m": 62,
+      "pressure": 1022.9,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "4:00",
+      "offset": 0,
+      "temp": 21,
+      "windSpeed": 14.2,
+      "windDir": 59,
+      "windSpeed1000m": 14.3,
+      "windDir1000m": 65,
       "pressure": 1022.7,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "5:00",
+      "offset": 1,
+      "temp": 21,
+      "windSpeed": 13.5,
+      "windDir": 64,
+      "windSpeed1000m": 11.4,
+      "windDir1000m": 72,
+      "pressure": 1022.9,
       "info": {
         "icon": "⛅",
         "text": "晴れ/曇り"
+      }
+    },
+    {
+      "time": "6:00",
+      "offset": 2,
+      "temp": 20,
+      "windSpeed": 15.3,
+      "windDir": 71,
+      "windSpeed1000m": 9.5,
+      "windDir1000m": 81,
+      "pressure": 1023.3,
+      "info": {
+        "icon": "⛅",
+        "text": "晴れ/曇り"
+      }
+    },
+    {
+      "time": "7:00",
+      "offset": 3,
+      "temp": 20,
+      "windSpeed": 17.5,
+      "windDir": 68,
+      "windSpeed1000m": 10.5,
+      "windDir1000m": 84,
+      "pressure": 1023.7,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
       }
     }
   ]
