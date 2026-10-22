@@ -2,8 +2,12 @@
   "volcano": {
     "hasAshfallWarning": true,
     "directionText": "東（鹿屋市輝北方向）",
-    "validUntil": "2026-10-22T10:50:02.288Z",
+    "validUntil": "2026-10-22T13:01:38.687Z",
     "recentEruptions": [
+      {
+        "time": "2026-10-21T23:00:00Z",
+        "title": "降灰予報（定時）"
+      },
       {
         "time": "2026-10-21T20:00:00Z",
         "title": "降灰予報（定時）"
@@ -38,10 +42,6 @@
       },
       {
         "time": "2026-10-21T12:32:00Z",
-        "title": "推定噴煙流向報"
-      },
-      {
-        "time": "2026-10-21T12:26:00Z",
         "title": "推定噴煙流向報"
       }
     ],
@@ -94,56 +94,14 @@
   },
   "hourlyForecast": [
     {
-      "time": "4:00",
+      "time": "7:00",
       "offset": -3,
       "temp": 18,
-      "windSpeed": 24.2,
-      "windDir": 341,
-      "windSpeed1000m": 11.5,
-      "windDir1000m": 321,
-      "pressure": 1019.2,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "5:00",
-      "offset": -2,
-      "temp": 18,
-      "windSpeed": 23.4,
-      "windDir": 343,
-      "windSpeed1000m": 11.2,
-      "windDir1000m": 320,
-      "pressure": 1019.2,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "6:00",
-      "offset": -1,
-      "temp": 17,
-      "windSpeed": 23.2,
-      "windDir": 350,
-      "windSpeed1000m": 10.3,
-      "windDir1000m": 324,
-      "pressure": 1019.8,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "7:00",
-      "offset": 0,
-      "temp": 18,
-      "windSpeed": 26.9,
-      "windDir": 356,
-      "windSpeed1000m": 10.2,
-      "windDir1000m": 337,
-      "pressure": 1019.7,
+      "windSpeed": 26.8,
+      "windDir": 351,
+      "windSpeed1000m": 11.4,
+      "windDir1000m": 347,
+      "pressure": 1019.5,
       "info": {
         "icon": "☀️",
         "text": "快晴"
@@ -151,12 +109,12 @@
     },
     {
       "time": "8:00",
-      "offset": 1,
+      "offset": -2,
       "temp": 19,
-      "windSpeed": 19.5,
-      "windDir": 360,
-      "windSpeed1000m": 10.9,
-      "windDir1000m": 354,
+      "windSpeed": 19.8,
+      "windDir": 358,
+      "windSpeed1000m": 9.4,
+      "windDir1000m": 2,
       "pressure": 1020.3,
       "info": {
         "icon": "☀️",
@@ -165,13 +123,13 @@
     },
     {
       "time": "9:00",
-      "offset": 2,
+      "offset": -1,
       "temp": 20,
-      "windSpeed": 13.9,
+      "windSpeed": 14.5,
       "windDir": 10,
-      "windSpeed1000m": 10.9,
-      "windDir1000m": 8,
-      "pressure": 1020.6,
+      "windSpeed1000m": 8,
+      "windDir1000m": 18,
+      "pressure": 1020.5,
       "info": {
         "icon": "☀️",
         "text": "快晴"
@@ -179,16 +137,58 @@
     },
     {
       "time": "10:00",
-      "offset": 3,
+      "offset": 0,
       "temp": 21,
-      "windSpeed": 9.7,
-      "windDir": 29,
-      "windSpeed1000m": 8.9,
-      "windDir1000m": 21,
-      "pressure": 1020.7,
+      "windSpeed": 10.7,
+      "windDir": 32,
+      "windSpeed1000m": 6.7,
+      "windDir1000m": 36,
+      "pressure": 1020.2,
       "info": {
-        "icon": "☀️",
-        "text": "快晴"
+        "icon": "⛅",
+        "text": "晴れ/曇り"
+      }
+    },
+    {
+      "time": "11:00",
+      "offset": 1,
+      "temp": 22,
+      "windSpeed": 7.5,
+      "windDir": 66,
+      "windSpeed1000m": 5.7,
+      "windDir1000m": 55,
+      "pressure": 1020.1,
+      "info": {
+        "icon": "⛅",
+        "text": "晴れ/曇り"
+      }
+    },
+    {
+      "time": "12:00",
+      "offset": 2,
+      "temp": 23,
+      "windSpeed": 6.3,
+      "windDir": 92,
+      "windSpeed1000m": 5.2,
+      "windDir1000m": 74,
+      "pressure": 1019.8,
+      "info": {
+        "icon": "⛅",
+        "text": "晴れ/曇り"
+      }
+    },
+    {
+      "time": "13:00",
+      "offset": 3,
+      "temp": 24,
+      "windSpeed": 8.2,
+      "windDir": 128,
+      "windSpeed1000m": 5.1,
+      "windDir1000m": 82,
+      "pressure": 1019.1,
+      "info": {
+        "icon": "⛅",
+        "text": "晴れ/曇り"
       }
     }
   ]
