@@ -2,8 +2,12 @@
   "volcano": {
     "hasAshfallWarning": true,
     "directionText": "北西（鹿児島市吉野方向）",
-    "validUntil": "2026-10-23T05:41:39.541Z",
+    "validUntil": "2026-10-23T08:53:42.976Z",
     "recentEruptions": [
+      {
+        "time": "2026-10-22T20:00:00Z",
+        "title": "降灰予報（定時）"
+      },
       {
         "time": "2026-10-22T17:00:00Z",
         "title": "降灰予報（定時）"
@@ -38,10 +42,6 @@
       },
       {
         "time": "2026-10-21T23:00:00Z",
-        "title": "降灰予報（定時）"
-      },
-      {
-        "time": "2026-10-21T20:00:00Z",
         "title": "降灰予報（定時）"
       }
     ],
@@ -94,56 +94,14 @@
   },
   "hourlyForecast": [
     {
-      "time": "23:00",
-      "offset": -3,
-      "temp": 20,
-      "windSpeed": 29.9,
-      "windDir": 80,
-      "windSpeed1000m": 21.3,
-      "windDir1000m": 79,
-      "pressure": 1021.3,
-      "info": {
-        "icon": "⛅",
-        "text": "晴れ/曇り"
-      }
-    },
-    {
-      "time": "0:00",
-      "offset": -2,
-      "temp": 20,
-      "windSpeed": 28.2,
-      "windDir": 84,
-      "windSpeed1000m": 21,
-      "windDir1000m": 77,
-      "pressure": 1021,
-      "info": {
-        "icon": "⛅",
-        "text": "晴れ/曇り"
-      }
-    },
-    {
-      "time": "1:00",
-      "offset": -1,
-      "temp": 20,
-      "windSpeed": 28.7,
-      "windDir": 71,
-      "windSpeed1000m": 19.8,
-      "windDir1000m": 78,
-      "pressure": 1020.1,
-      "info": {
-        "icon": "⛅",
-        "text": "晴れ/曇り"
-      }
-    },
-    {
       "time": "2:00",
-      "offset": 0,
+      "offset": -3,
       "temp": 21,
-      "windSpeed": 28.5,
-      "windDir": 61,
-      "windSpeed1000m": 18.6,
-      "windDir1000m": 81,
-      "pressure": 1019.2,
+      "windSpeed": 31,
+      "windDir": 69,
+      "windSpeed1000m": 20.7,
+      "windDir1000m": 83,
+      "pressure": 1019.3,
       "info": {
         "icon": "⛅",
         "text": "晴れ/曇り"
@@ -151,27 +109,27 @@
     },
     {
       "time": "3:00",
-      "offset": 1,
-      "temp": 20,
-      "windSpeed": 29.5,
-      "windDir": 63,
-      "windSpeed1000m": 17.7,
-      "windDir1000m": 84,
+      "offset": -2,
+      "temp": 21,
+      "windSpeed": 29.6,
+      "windDir": 68,
+      "windSpeed1000m": 19.5,
+      "windDir1000m": 86,
       "pressure": 1018.8,
       "info": {
-        "icon": "☔",
-        "text": "雨"
+        "icon": "⛅",
+        "text": "晴れ/曇り"
       }
     },
     {
       "time": "4:00",
-      "offset": 2,
-      "temp": 20,
-      "windSpeed": 30.2,
-      "windDir": 66,
-      "windSpeed1000m": 18.4,
+      "offset": -1,
+      "temp": 21,
+      "windSpeed": 31.1,
+      "windDir": 72,
+      "windSpeed1000m": 19.8,
       "windDir1000m": 87,
-      "pressure": 1018.7,
+      "pressure": 1018.6,
       "info": {
         "icon": "☔",
         "text": "雨"
@@ -179,16 +137,58 @@
     },
     {
       "time": "5:00",
+      "offset": 0,
+      "temp": 21,
+      "windSpeed": 33.4,
+      "windDir": 72,
+      "windSpeed1000m": 20.5,
+      "windDir1000m": 87,
+      "pressure": 1019,
+      "info": {
+        "icon": "☔",
+        "text": "雨"
+      }
+    },
+    {
+      "time": "6:00",
+      "offset": 1,
+      "temp": 21,
+      "windSpeed": 31.1,
+      "windDir": 67,
+      "windSpeed1000m": 21.6,
+      "windDir1000m": 87,
+      "pressure": 1019.3,
+      "info": {
+        "icon": "☔",
+        "text": "雨"
+      }
+    },
+    {
+      "time": "7:00",
+      "offset": 2,
+      "temp": 21,
+      "windSpeed": 30.1,
+      "windDir": 71,
+      "windSpeed1000m": 22.7,
+      "windDir1000m": 87,
+      "pressure": 1019.3,
+      "info": {
+        "icon": "☔",
+        "text": "雨"
+      }
+    },
+    {
+      "time": "8:00",
       "offset": 3,
       "temp": 21,
-      "windSpeed": 29.7,
-      "windDir": 69,
-      "windSpeed1000m": 19.8,
-      "windDir1000m": 88,
-      "pressure": 1018.8,
+      "windSpeed": 28.7,
+      "windDir": 67,
+      "windSpeed1000m": 23.4,
+      "windDir1000m": 87,
+      "pressure": 1019,
       "info": {
-        "icon": "⛅",
-        "text": "晴れ/曇り"
+        "icon": "☔",
+        "text": "雨"
       }
     }
   ]
