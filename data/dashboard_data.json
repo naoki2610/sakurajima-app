@@ -2,8 +2,12 @@
   "volcano": {
     "hasAshfallWarning": true,
     "directionText": "南（指宿方向）",
-    "validUntil": "2026-10-28T06:24:59.490Z",
+    "validUntil": "2026-10-28T10:41:26.567Z",
     "recentEruptions": [
+      {
+        "time": "2026-10-27T20:00:00Z",
+        "title": "降灰予報（定時）"
+      },
       {
         "time": "2026-10-27T17:00:00Z",
         "title": "降灰予報（定時）"
@@ -38,10 +42,6 @@
       },
       {
         "time": "2026-10-26T23:00:00Z",
-        "title": "降灰予報（定時）"
-      },
-      {
-        "time": "2026-10-26T20:00:00Z",
         "title": "降灰予報（定時）"
       }
     ],
@@ -94,70 +94,14 @@
   },
   "hourlyForecast": [
     {
-      "time": "0:00",
-      "offset": -3,
-      "temp": 17,
-      "windSpeed": 24.5,
-      "windDir": 351,
-      "windSpeed1000m": 9.5,
-      "windDir1000m": 331,
-      "pressure": 1018.2,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "1:00",
-      "offset": -2,
-      "temp": 17,
-      "windSpeed": 23.2,
-      "windDir": 350,
-      "windSpeed1000m": 10,
-      "windDir1000m": 334,
-      "pressure": 1018.4,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "2:00",
-      "offset": -1,
-      "temp": 17,
-      "windSpeed": 22.3,
-      "windDir": 349,
-      "windSpeed1000m": 10.8,
-      "windDir1000m": 339,
-      "pressure": 1018.6,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "3:00",
-      "offset": 0,
-      "temp": 16,
-      "windSpeed": 21.9,
-      "windDir": 348,
-      "windSpeed1000m": 12.1,
-      "windDir1000m": 343,
-      "pressure": 1018.7,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
       "time": "4:00",
-      "offset": 1,
+      "offset": -3,
       "temp": 16,
-      "windSpeed": 23.2,
-      "windDir": 347,
-      "windSpeed1000m": 13.7,
-      "windDir1000m": 346,
-      "pressure": 1018.8,
+      "windSpeed": 24.1,
+      "windDir": 348,
+      "windSpeed1000m": 13.2,
+      "windDir1000m": 343,
+      "pressure": 1019.2,
       "info": {
         "icon": "☀️",
         "text": "快晴"
@@ -165,13 +109,13 @@
     },
     {
       "time": "5:00",
-      "offset": 2,
-      "temp": 15,
-      "windSpeed": 24.3,
+      "offset": -2,
+      "temp": 16,
+      "windSpeed": 24.4,
       "windDir": 350,
-      "windSpeed1000m": 15.4,
-      "windDir1000m": 349,
-      "pressure": 1019.4,
+      "windSpeed1000m": 14.4,
+      "windDir1000m": 347,
+      "pressure": 1019.8,
       "info": {
         "icon": "☀️",
         "text": "快晴"
@@ -179,13 +123,69 @@
     },
     {
       "time": "6:00",
-      "offset": 3,
-      "temp": 15,
+      "offset": -1,
+      "temp": 16,
       "windSpeed": 23.9,
       "windDir": 352,
-      "windSpeed1000m": 16.4,
+      "windSpeed1000m": 15.7,
       "windDir1000m": 351,
-      "pressure": 1020.2,
+      "pressure": 1020.3,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "7:00",
+      "offset": 0,
+      "temp": 15,
+      "windSpeed": 24.2,
+      "windDir": 354,
+      "windSpeed1000m": 16.3,
+      "windDir1000m": 354,
+      "pressure": 1020.8,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "8:00",
+      "offset": 1,
+      "temp": 16,
+      "windSpeed": 24,
+      "windDir": 355,
+      "windSpeed1000m": 16.2,
+      "windDir1000m": 357,
+      "pressure": 1021.7,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "9:00",
+      "offset": 2,
+      "temp": 17,
+      "windSpeed": 20,
+      "windDir": 359,
+      "windSpeed1000m": 15.5,
+      "windDir1000m": 360,
+      "pressure": 1022.2,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "10:00",
+      "offset": 3,
+      "temp": 18,
+      "windSpeed": 15.9,
+      "windDir": 13,
+      "windSpeed1000m": 13.3,
+      "windDir1000m": 360,
+      "pressure": 1022,
       "info": {
         "icon": "☀️",
         "text": "快晴"
