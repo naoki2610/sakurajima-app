@@ -1,9 +1,17 @@
 {
   "volcano": {
     "hasAshfallWarning": true,
-    "directionText": "南東（垂水・鹿屋方向）",
-    "validUntil": "2026-10-31T19:36:59.990Z",
+    "directionText": "南（指宿方向）",
+    "validUntil": "2026-11-01T01:56:12.224Z",
     "recentEruptions": [
+      {
+        "time": "2026-10-31T11:00:00Z",
+        "title": "降灰予報（定時）"
+      },
+      {
+        "time": "2026-10-31T08:00:00Z",
+        "title": "降灰予報（定時）"
+      },
       {
         "time": "2026-10-31T05:00:00Z",
         "title": "降灰予報（定時）"
@@ -35,14 +43,6 @@
       {
         "time": "2026-10-30T11:23:00Z",
         "title": "推定噴煙流向報"
-      },
-      {
-        "time": "2026-10-30T11:22:31Z",
-        "title": "噴火に関する火山観測報"
-      },
-      {
-        "time": "2026-10-30T11:11:00Z",
-        "title": "降灰予報（速報）"
       }
     ],
     "ashfallGeoJson": {
@@ -94,98 +94,98 @@
   },
   "hourlyForecast": [
     {
-      "time": "13:00",
-      "offset": -3,
-      "temp": 23,
-      "windSpeed": 17.6,
-      "windDir": 331,
-      "windSpeed1000m": 19.1,
-      "windDir1000m": 328,
-      "pressure": 1019.4,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "14:00",
-      "offset": -2,
-      "temp": 23,
-      "windSpeed": 16.8,
-      "windDir": 326,
-      "windSpeed1000m": 18.8,
-      "windDir1000m": 324,
-      "pressure": 1019,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "15:00",
-      "offset": -1,
-      "temp": 23,
-      "windSpeed": 18,
-      "windDir": 322,
-      "windSpeed1000m": 17.9,
-      "windDir1000m": 320,
-      "pressure": 1019.3,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "16:00",
-      "offset": 0,
-      "temp": 22,
-      "windSpeed": 18,
-      "windDir": 321,
-      "windSpeed1000m": 16.8,
-      "windDir1000m": 317,
-      "pressure": 1019.6,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "17:00",
-      "offset": 1,
-      "temp": 21,
-      "windSpeed": 15,
-      "windDir": 315,
-      "windSpeed1000m": 15,
-      "windDir1000m": 314,
-      "pressure": 1019.9,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
-      "time": "18:00",
-      "offset": 2,
-      "temp": 20,
-      "windSpeed": 15.4,
-      "windDir": 316,
-      "windSpeed1000m": 14,
-      "windDir1000m": 314,
-      "pressure": 1020.6,
-      "info": {
-        "icon": "☀️",
-        "text": "快晴"
-      }
-    },
-    {
       "time": "19:00",
+      "offset": -3,
+      "temp": 18,
+      "windSpeed": 18.6,
+      "windDir": 325,
+      "windSpeed1000m": 11.5,
+      "windDir1000m": 319,
+      "pressure": 1021,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "20:00",
+      "offset": -2,
+      "temp": 18,
+      "windSpeed": 17,
+      "windDir": 337,
+      "windSpeed1000m": 12.9,
+      "windDir1000m": 330,
+      "pressure": 1021.2,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "21:00",
+      "offset": -1,
+      "temp": 17,
+      "windSpeed": 14.8,
+      "windDir": 343,
+      "windSpeed1000m": 14,
+      "windDir1000m": 337,
+      "pressure": 1021.4,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "22:00",
+      "offset": 0,
+      "temp": 17,
+      "windSpeed": 11.7,
+      "windDir": 347,
+      "windSpeed1000m": 13.8,
+      "windDir1000m": 345,
+      "pressure": 1021.4,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "23:00",
+      "offset": 1,
+      "temp": 17,
+      "windSpeed": 9.3,
+      "windDir": 349,
+      "windSpeed1000m": 12.7,
+      "windDir1000m": 353,
+      "pressure": 1021,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "0:00",
+      "offset": 2,
+      "temp": 16,
+      "windSpeed": 7.9,
+      "windDir": 357,
+      "windSpeed1000m": 12.2,
+      "windDir1000m": 2,
+      "pressure": 1020.7,
+      "info": {
+        "icon": "☀️",
+        "text": "快晴"
+      }
+    },
+    {
+      "time": "1:00",
       "offset": 3,
-      "temp": 19,
-      "windSpeed": 15.5,
-      "windDir": 331,
-      "windSpeed1000m": 14.1,
-      "windDir1000m": 320,
-      "pressure": 1021.3,
+      "temp": 16,
+      "windSpeed": 5.1,
+      "windDir": 354,
+      "windSpeed1000m": 12,
+      "windDir1000m": 7,
+      "pressure": 1020.8,
       "info": {
         "icon": "☀️",
         "text": "快晴"
